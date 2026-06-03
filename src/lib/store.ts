@@ -158,8 +158,7 @@ export const levels: Level[] = [
       { id: "e14", from: "v3", to: "v8" },
       { id: "e15", from: "v4", to: "v9" },
       // Cross-cuts to make it harder
-      { id: "e16", from: "v0", to: "v7" },
-      { id: "e17", from: "v2", to: "v5" }
+      { id: "e16", from: "v0", to: "v7" }
     ]
   }
 ];
@@ -267,6 +266,64 @@ export function loadLevel(levelId: number) {
 
 export function resetLevel() {
   loadLevel(get(currentLevelId));
+}
+
+const levelSolutions: Record<number, Vertex[]> = {
+  1: [
+    { id: "v1", x: 100, y: 100 },
+    { id: "v2", x: 300, y: 100 },
+    { id: "v3", x: 100, y: 300 },
+    { id: "v4", x: 180, y: 180 }
+  ],
+  2: [
+    { id: "v0", x: 100, y: 100 },
+    { id: "v1", x: 200, y: 200 },
+    { id: "v2", x: 300, y: 100 },
+    { id: "v3", x: 100, y: 300 },
+    { id: "v4", x: 300, y: 300 }
+  ],
+  3: [
+    { id: "v0", x: 70, y: 70 },
+    { id: "v1", x: 330, y: 70 },
+    { id: "v2", x: 330, y: 330 },
+    { id: "v3", x: 70, y: 330 },
+    { id: "v4", x: 150, y: 150 },
+    { id: "v5", x: 250, y: 150 },
+    { id: "v6", x: 250, y: 250 },
+    { id: "v7", x: 150, y: 250 }
+  ],
+  4: [
+    { id: "v0", x: 200, y: 70 },
+    { id: "v1", x: 324, y: 160 },
+    { id: "v2", x: 276, y: 305 },
+    { id: "v3", x: 124, y: 305 },
+    { id: "v4", x: 76, y: 160 },
+    { id: "v5", x: 200, y: 200 }
+  ],
+  5: [
+    { id: "v0", x: 350, y: 162 },
+    { id: "v1", x: 291, y: 350 },
+    { id: "v2", x: 81, y: 350 },
+    { id: "v3", x: 88, y: 142 },
+    { id: "v4", x: 281, y: 50 },
+    { id: "v5", x: 306, y: 183 },
+    { id: "v6", x: 252, y: 274 },
+    { id: "v7", x: 108, y: 277 },
+    { id: "v8", x: 128, y: 165 },
+    { id: "v9", x: 208, y: 111 }
+  ]
+};
+
+export function solveCurrentLevel() {
+  const levelId = get(currentLevelId);
+  const solutionCoords = levelSolutions[levelId];
+  if (!solutionCoords) return;
+
+  // Set the vertices to their solved coordinates
+  vertices.set(JSON.parse(JSON.stringify(solutionCoords)));
+  
+  // Recalculate intersections and victory check
+  checkIntersections();
 }
 
 // ---------------------------------------------------------

@@ -11,7 +11,8 @@
     edges,
     loadLevel,
     resetLevel,
-    checkIntersections
+    checkIntersections,
+    solveCurrentLevel
   } from './lib/store';
   import { 
     RefreshCw, 
@@ -23,7 +24,8 @@
     Timer,
     Activity,
     Trophy,
-    Info
+    Info,
+    Wand2
   } from '@lucide/svelte';
 
   let showHelp = $state(false);
@@ -254,6 +256,13 @@
             <div class="step-badge">4</div>
             <p><strong>Solve:</strong> Rearrange all dots so that zero wires cross, lighting up the entire mesh!</p>
           </div>
+        </div>
+        
+        <div class="help-solution-footer">
+          <p class="solution-text">Stuck on this level? Let the game calibrate the optimal vertex coordinates for you.</p>
+          <button class="solve-btn" onclick={() => { showHelp = false; solveCurrentLevel(); }}>
+            <Wand2 size={13} style="margin-right: 6px; display: inline-block; vertical-align: middle;" /> Auto-Solve Puzzle
+          </button>
         </div>
       </div>
     {/if}
@@ -909,5 +918,50 @@
   @keyframes scaleUp {
     from { transform: scale(0.92); opacity: 0; }
     to { transform: scale(1); opacity: 1; }
+  }
+
+  /* Solution Footer & Solve Button */
+  .help-solution-footer {
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+    text-align: center;
+  }
+
+  .solution-text {
+    font-size: 11px;
+    color: hsl(var(--text-muted));
+    line-height: 1.4;
+    margin: 0;
+  }
+
+  .solve-btn {
+    width: 100%;
+    background: linear-gradient(135deg, rgba(0, 229, 255, 0.2) 0%, rgba(0, 136, 255, 0.2) 100%);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    border-radius: 10px;
+    color: #ffffff;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 12px;
+    padding: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 0 15px rgba(0, 229, 255, 0.05);
+  }
+
+  .solve-btn:hover {
+    background: linear-gradient(135deg, rgba(0, 229, 255, 0.35) 0%, rgba(0, 136, 255, 0.35) 100%);
+    border-color: rgba(0, 229, 255, 0.5);
+    box-shadow: 0 0 20px rgba(0, 229, 255, 0.15);
+    transform: translateY(-1px);
+  }
+
+  .solve-btn:active {
+    transform: translateY(0);
   }
 </style>
