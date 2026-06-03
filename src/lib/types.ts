@@ -1,36 +1,20 @@
-export type PortType = 'text' | 'any';
-
-export interface Port {
+export interface Vertex {
   id: string;
-  name: string;
-  type: PortType;
-}
-
-export type NodeType = 'input' | 'scrubber' | 'prompt' | 'output';
-
-export interface Node {
-  id: string;
-  type: NodeType;
-  name: string;
   x: number;
   y: number;
-  inputs: Port[];
-  outputs: Port[];
-  // Dynamic execution state
-  status: 'idle' | 'running' | 'success' | 'error';
-  errorMessage?: string;
-  // Node parameters and run values
-  params: Record<string, any>;
-  inputValues: Record<string, string>;
-  outputValues: Record<string, string>;
 }
 
-export interface Connection {
+export interface Edge {
   id: string;
-  fromNodeId: string;
-  fromPortId: string;
-  toNodeId: string;
-  toPortId: string;
-  // Visual pulsing when active
-  isPulsing?: boolean;
+  from: string; // Vertex ID
+  to: string;   // Vertex ID
+  isIntersecting?: boolean; // Set dynamically during calculation
+}
+
+export interface Level {
+  id: number;
+  name: string;
+  description: string;
+  vertices: Vertex[];
+  edges: Edge[];
 }

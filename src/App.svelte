@@ -1,231 +1,407 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import Canvas from './lib/components/Canvas.svelte';
   import { 
-    addNode, 
-    runWorkflow, 
-    isRunning, 
-    nodes, 
-    connections,
-    zoom,
-    panX,
-    panY,
-    selectedNodeId
+    levels,
+    currentLevelId,
+    gameWon,
+    moves,
+    timeElapsed,
+    isRunning,
+    vertices,
+    edges,
+    loadLevel,
+    resetLevel,
+    checkIntersections
   } from './lib/store';
   import { 
-    Play, 
-    Plus, 
     RefreshCw, 
-    Compass, 
-    ZoomIn, 
-    ZoomOut, 
     HelpCircle, 
     Sparkles, 
-    GitCommit, 
-    FileCode, 
-    Info,
-    X
+    X,
+    Gamepad2,
+    ChevronRight,
+    Timer,
+    Activity,
+    Trophy,
+    Info
   } from '@lucide/svelte';
 
-  let showHelp = $state(true);
+  let showHelp = $state(false);
+  let svgElement: SVGSVGElement | null = $state(null);
+  let draggingVertexId: string | null = $state(null);
 
-  // Setup a default demo workflow on mount to WOW the user immediately!
+  // Setup the first level on mount to start the game
   onMount(() => {
-    loadTemplate();
+    loadLevel(1);
   });
 
-  function loadTemplate() {
-    // Clear existing
-    nodes.set([]);
-    connections.set([]);
-    selectedNodeId.set(null);
-    zoom.set(0.95);
-    panX.set(40);
-    panY.set(20);
+  // Helper to format time as MM:SS
+  function formatTime(seconds: number): string {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
 
-    // Add nodes
-    addNode('input', 80, 220);
-    addNode('scrubber', 420, 100);
-    addNode('prompt', 420, 360);
-    addNode('output', 800, 240);
+  // Get active level details
+  let activeLevel = $derived(levels.find(l => l.id === $currentLevelId) || levels[0]);
+  let formattedTime = $derived(formatTime($timeElapsed));
 
-    // Defer connections slightly to allow Svelte 5 to create DOM port elements
-    setTimeout(() => {
-      const allNodes = $nodes;
-      const inputNode = allNodes.find((n) => n.type === 'input');
-      const scrubNode = allNodes.find((n) => n.type === 'scrubber');
-      const promptNode = allNodes.find((n) => n.type === 'prompt');
-      const outputNode = allNodes.find((n) => n.type === 'output');
+  // Pointer position translation helper
+  function getSvgCoords(clientX: number, clientY: number) {
+    if (!svgElement) return { x: 200, y: 200 };
+    const rect = svgElement.getBoundingClientRect();
+    // Scale client coords to viewBox coords (0..400)
+    const x = ((clientX - rect.left) / rect.width) * 400;
+    const y = ((clientY - rect.top) / rect.height) * 400;
+    // Constrain points inside margins to keep them on the game board
+    return {
+      x: Math.max(15, Math.min(385, x)),
+      y: Math.max(15, Math.min(385, y))
+    };
+  }
 
-      if (inputNode && scrubNode && promptNode && outputNode) {
-        connections.set([
-          // Input -> Scrubber
-          {
-            id: 'conn-1',
-            fromNodeId: inputNode.id,
-            fromPortId: 'out',
-            toNodeId: scrubNode.id,
-            toPortId: 'in'
-          },
-          // Input -> AI Prompt
-          {
-            id: 'conn-2',
-            fromNodeId: inputNode.id,
-            fromPortId: 'out',
-            toNodeId: promptNode.id,
-            toPortId: 'in'
-          },
-          // AI Prompt -> Terminal Output
-          {
-            id: 'conn-3',
-            fromNodeId: promptNode.id,
-            fromPortId: 'out',
-            toNodeId: outputNode.id,
-            toPortId: 'in'
-          }
-        ]);
+  // Drag and Drop event handlers
+  function handlePointerDown(event: PointerEvent, id: string) {
+    event.preventDefault();
+    const el = event.currentTarget as HTMLElement | SVGElement;
+    try {
+      el.setPointerCapture(event.pointerId);
+    } catch (err) {
+      console.warn("Failed to set pointer capture:", err);
+    }
+    draggingVertexId = id;
+    moves.update(m => m + 1);
+  }
+
+  function handlePointerMove(event: PointerEvent, id: string) {
+    if (draggingVertexId !== id) return;
+    const { x, y } = getSvgCoords(event.clientX, event.clientY);
+    vertices.update(vList => vList.map(v => v.id === id ? { ...v, x, y } : v));
+    checkIntersections();
+  }
+
+  function handlePointerUp(event: PointerEvent, id: string) {
+    if (draggingVertexId === id) {
+      draggingVertexId = null;
+      const el = event.currentTarget as HTMLElement | SVGElement;
+      try {
+        el.releasePointerCapture(event.pointerId);
+      } catch (err) {
+        // Already released or failed
       }
-    }, 100);
+    }
   }
 
-  function handleAddNode(type: 'input' | 'scrubber' | 'prompt' | 'output') {
-    // Add node near center of screen
-    const x = 200 - $panX;
-    const y = 250 - $panY;
-    addNode(type, x, y);
-  }
-
-  function resetView() {
-    zoom.set(1);
-    panX.set(100);
-    panY.set(100);
+  function nextLevel() {
+    if ($currentLevelId < levels.length) {
+      loadLevel($currentLevelId + 1);
+    }
   }
 </script>
 
 <main class="app-container">
-  <!-- Top Control Bar -->
-  <header class="top-bar glass">
-    <!-- Logo & Title -->
-    <div class="logo-area">
-      <svg class="logo-icon" width="28" height="28" viewBox="0 0 32 32" fill="none">
-        <rect x="2.5" y="2.5" width="27" height="27" rx="8" stroke="url(#logoGlow)" stroke-width="2" stroke-dasharray="2 3" opacity="0.6"/>
-        <path d="M8 10L16 20L24 10" stroke="#00E5FF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="16" cy="23.5" r="2.5" fill="#8d57eb" />
-        <defs>
-          <linearGradient id="logoGlow" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#00E5FF" />
-            <stop offset="100%" stop-color="#8d57eb" />
-          </linearGradient>
-        </defs>
-      </svg>
-      <div class="logo-text">
-        <span class="brand-name">pathwire</span><span class="brand-suffix">.ai</span>
-      </div>
-      <div class="version-tag">v1.0.0-beta</div>
-    </div>
-
-    <!-- Toolbar: Adding Nodes -->
-    <div class="toolbar">
-      <button class="tool-btn add-input" onclick={() => handleAddNode('input')}>
-        <Plus size={14} /> Add Source
-      </button>
-      <button class="tool-btn add-scrubber" onclick={() => handleAddNode('scrubber')}>
-        <Plus size={14} /> Add Scrubber
-      </button>
-      <button class="tool-btn add-prompt" onclick={() => handleAddNode('prompt')}>
-        <Plus size={14} /> Add AI Prompt
-      </button>
-      <button class="tool-btn add-output" onclick={() => handleAddNode('output')}>
-        <Plus size={14} /> Add Terminal
-      </button>
-    </div>
-
-    <!-- Execution Panel -->
-    <div class="execution-actions">
-      <button class="template-btn" onclick={loadTemplate} title="Reset to template">
-        <RefreshCw size={14} />
-      </button>
-      <button 
-        class="run-btn glow-btn" 
-        onclick={runWorkflow} 
-        disabled={$isRunning}
-      >
-        {#if $isRunning}
-          <div class="btn-spinner"></div> Running...
-        {:else}
-          <Play size={14} fill="currentColor" /> Run Workflow
-        {/if}
-      </button>
-    </div>
-  </header>
-
-  <!-- Interactive Editor Canvas -->
-  <Canvas />
-
-  <!-- View Controls Overlay (Bottom-Left) -->
-  <div class="view-controls glass">
-    <button onclick={() => zoom.update(z => Math.max(0.3, z - 0.1))} title="Zoom Out"><ZoomOut size={16} /></button>
-    <span class="zoom-percent">{Math.round($zoom * 100)}%</span>
-    <button onclick={() => zoom.update(z => Math.min(2, z + 0.1))} title="Zoom In"><ZoomIn size={16} /></button>
-    <div class="divider"></div>
-    <button onclick={resetView} title="Center View"><Compass size={16} /></button>
-    <div class="divider"></div>
-    <button onclick={() => showHelp = !showHelp} class:active={showHelp} title="Show Help"><HelpCircle size={16} /></button>
+  <!-- Interactive background elements -->
+  <div class="grid-pattern"></div>
+  <div class="ambient-glows">
+    <div class="glow-sphere pink"></div>
+    <div class="glow-sphere cyan"></div>
   </div>
 
-  <!-- Help & Onboarding Overlay (Bottom-Right) -->
-  {#if showHelp}
-    <div class="help-overlay glass">
-      <div class="help-header">
-        <div class="help-title">
-          <Sparkles size={14} style="color: #00E5FF;" /> How to use Pathwire
-        </div>
-        <button class="close-help" onclick={() => showHelp = false}><X size={12} /></button>
+  <!-- Main Device Frame -->
+  <div class="device-frame">
+    <!-- Header -->
+    <header class="game-header">
+      <div class="logo-area">
+        <Gamepad2 size={22} style="color: #00E5FF; filter: drop-shadow(0 0 4px #00E5FF);" />
+        <h1 class="logo-text">PATH<span>WIRE</span></h1>
       </div>
-      <ul class="help-steps">
-        <li>
-          <div class="step-num">1</div>
-          <span><strong>Drag Outward:</strong> Drag output ports (right dots) to input ports (left dots) to connect.</span>
-        </li>
-        <li>
-          <div class="step-num">2</div>
-          <span><strong>Double-Click Wires:</strong> Double-click any cable to delete a connection wire.</span>
-        </li>
-        <li>
-          <div class="step-num">3</div>
-          <span><strong>Execute Pipeline:</strong> Click <strong>Run Workflow</strong> to watch data pulse down the wires and execute.</span>
-        </li>
-      </ul>
-      <div class="help-footer">
-        <Info size={12} />
-        <span>Preloaded template is ready! Click "Run" to test.</span>
+      <button class="help-btn" onclick={() => showHelp = !showHelp} class:active={showHelp} title="How to play">
+        <HelpCircle size={18} />
+      </button>
+    </header>
+
+    <!-- Stats Panel -->
+    <div class="stats-dashboard">
+      <div class="stat-card">
+        <span class="stat-label">Level</span>
+        <span class="stat-value" style="color: #00E5FF;">{activeLevel.id}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label"><Activity size={10} style="display:inline; margin-right:2px; vertical-align:middle;" /> Moves</span>
+        <span class="stat-value">{$moves}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label"><Timer size={10} style="display:inline; margin-right:2px; vertical-align:middle;" /> Time</span>
+        <span class="stat-value">{formattedTime}</span>
       </div>
     </div>
-  {/if}
+
+    <!-- Instruction Strip -->
+    <div class="level-info">
+      <div class="info-content">
+        <Info size={14} style="color: #00E5FF; flex-shrink: 0; margin-top: 1px;" />
+        <p class="description-text"><strong>{activeLevel.name}:</strong> {activeLevel.description}</p>
+      </div>
+    </div>
+
+    <!-- Canvas Area -->
+    <div class="canvas-container">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <svg 
+        bind:this={svgElement}
+        viewBox="0 0 400 400" 
+        class="svg-canvas"
+      >
+        <defs>
+          <!-- Pink Neon Glow -->
+          <filter id="glow-pink" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur1" />
+            <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur2" />
+            <feMerge>
+              <feMergeNode in="blur2" />
+              <feMergeNode in="blur1" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          
+          <!-- Cyan Neon Glow -->
+          <filter id="glow-cyan" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur1" />
+            <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur2" />
+            <feMerge>
+              <feMergeNode in="blur2" />
+              <feMergeNode in="blur1" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        <!-- Connection Wires (Edges) -->
+        {#each $edges as edge (edge.id)}
+          {@const fromV = $vertices.find(v => v.id === edge.from)}
+          {@const toV = $vertices.find(v => v.id === edge.to)}
+          {#if fromV && toV}
+            <line
+              x1={fromV.x}
+              y1={fromV.y}
+              x2={toV.x}
+              y2={toV.y}
+              class="edge {edge.isIntersecting ? 'edge-intersecting' : 'edge-clean'}"
+            />
+          {/if}
+        {/each}
+
+        <!-- Vertices -->
+        {#each $vertices as vertex (vertex.id)}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <g
+            class="vertex-group"
+            class:dragging={draggingVertexId === vertex.id}
+            transform="translate({vertex.x}, {vertex.y})"
+            onpointerdown={(e) => handlePointerDown(e, vertex.id)}
+            onpointermove={(e) => handlePointerMove(e, vertex.id)}
+            onpointerup={(e) => handlePointerUp(e, vertex.id)}
+          >
+            <circle cx="0" cy="0" r="18" class="vertex-glow" />
+            <circle cx="0" cy="0" r="8" class="vertex-point" />
+          </g>
+        {/each}
+      </svg>
+    </div>
+
+    <!-- Navigation / Reset Controls -->
+    <div class="level-select-container">
+      <select 
+        class="level-select" 
+        value={$currentLevelId} 
+        onchange={(e) => loadLevel(parseInt((e.target as HTMLSelectElement).value))}
+      >
+        {#each levels as lvl}
+          <option value={lvl.id}>Level {lvl.id}: {lvl.name}</option>
+        {/each}
+      </select>
+      
+      <button class="reset-btn" onclick={resetLevel} title="Reset level layout">
+        <RefreshCw size={16} />
+      </button>
+    </div>
+
+    <!-- Help Screen Overlay -->
+    {#if showHelp}
+      <div class="help-panel glass">
+        <div class="help-header">
+          <div class="help-title">
+            <Sparkles size={14} style="color: #00E5FF; margin-right: 4px;" /> How to Play
+          </div>
+          <button class="close-help-btn" onclick={() => showHelp = false}>
+            <X size={16} />
+          </button>
+        </div>
+        <div class="help-body">
+          <div class="instruction-item">
+            <div class="step-badge">1</div>
+            <p><strong>Goal:</strong> Drag the neon dots (vertices) around the screen to untangle the wire mesh.</p>
+          </div>
+          <div class="instruction-item">
+            <div class="step-badge">2</div>
+            <p><strong>Pink Wires:</strong> Intersecting/crossing lines glow <span class="text-pink">hot pink</span>.</p>
+          </div>
+          <div class="instruction-item">
+            <div class="step-badge">3</div>
+            <p><strong>Cyan Wires:</strong> Clean, untangled paths glow <span class="text-cyan">neon cyan</span>.</p>
+          </div>
+          <div class="instruction-item">
+            <div class="step-badge">4</div>
+            <p><strong>Solve:</strong> Rearrange all dots so that zero wires cross, lighting up the entire mesh!</p>
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Victory Screen Modal Overlay -->
+    {#if $gameWon}
+      <div class="win-modal-backdrop">
+        <div class="win-modal">
+          <div class="win-icon-wrapper">
+            <Trophy size={40} style="color: #00E5FF; filter: drop-shadow(0 0 8px #00E5FF);" />
+          </div>
+          <h2 class="win-title">SYSTEM UNTANGLED</h2>
+          <p class="win-subtitle">Level {activeLevel.id} fully calibrated.</p>
+          
+          <div class="win-stats-grid">
+            <div class="win-stat-item">
+              <span class="win-stat-label">Moves</span>
+              <span class="win-stat-val">{$moves}</span>
+            </div>
+            <div class="win-stat-item">
+              <span class="win-stat-label">Time</span>
+              <span class="win-stat-val">{formattedTime}</span>
+            </div>
+          </div>
+          
+          <div class="win-actions">
+            <button class="modal-btn secondary" onclick={resetLevel}>
+              Replay
+            </button>
+            
+            {#if $currentLevelId < levels.length}
+              <button class="modal-btn primary" onclick={nextLevel}>
+                Next Level <ChevronRight size={16} style="margin-left: 4px;" />
+              </button>
+            {:else}
+              <div class="completion-badge">
+                <Sparkles size={14} style="margin-right: 4px;" /> All Levels Cleared!
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    {/if}
+  </div>
 </main>
 
 <style>
   .app-container {
-    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
     width: 100vw;
     height: 100vh;
+    background: radial-gradient(circle at center, #0e172a 0%, #030712 100%);
     overflow: hidden;
+    position: relative;
   }
 
-  /* Control Top-bar */
-  .top-bar {
-    position: fixed;
-    top: 16px;
-    left: 16px;
-    right: 16px;
-    height: 60px;
-    border-radius: var(--radius-lg);
+  /* Grid pattern layer */
+  .grid-pattern {
+    position: absolute;
+    inset: 0;
+    background-image: 
+      linear-gradient(to right, rgba(0, 229, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0, 229, 255, 0.03) 1px, transparent 1px);
+    background-size: 30px 30px;
+    mask-image: radial-gradient(circle, black 35%, transparent 75%);
+    -webkit-mask-image: radial-gradient(circle, black 35%, transparent 75%);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Floating background ambiance */
+  .ambient-glows {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+  }
+  
+  .glow-sphere {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(120px);
+    opacity: 0.12;
+    mix-blend-mode: screen;
+  }
+  
+  .glow-sphere.pink {
+    width: 350px;
+    height: 350px;
+    background: #FF3366;
+    top: -80px;
+    left: -80px;
+    animation: float 20s infinite ease-in-out alternate;
+  }
+  
+  .glow-sphere.cyan {
+    width: 450px;
+    height: 450px;
+    background: #00E5FF;
+    bottom: -120px;
+    right: -80px;
+    animation: float 25s infinite ease-in-out alternate-reverse;
+  }
+  
+  @keyframes float {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(50px, 30px) scale(1.08); }
+  }
+
+  /* Simulated Mobile Device Frame */
+  .device-frame {
+    width: 100%;
+    max-width: 440px;
+    height: 100%;
+    max-height: 800px;
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 36px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5),
+                0 0 50px rgba(0, 229, 255, 0.05);
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    z-index: 10;
+  }
+
+  @media (max-width: 500px) {
+    .device-frame {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 0;
+      border: none;
+    }
+  }
+
+  /* Header area */
+  .game-header {
+    padding: 16px 20px 10px;
+    display: flex;
     justify-content: space-between;
-    padding: 0 20px;
-    z-index: 100;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   }
 
   .logo-area {
@@ -235,262 +411,503 @@
   }
 
   .logo-text {
-    display: flex;
-    align-items: baseline;
     font-family: var(--font-display);
     font-size: 18px;
-    font-weight: 700;
-  }
-
-  .brand-name {
-    color: hsl(var(--text-bright));
-    letter-spacing: -0.01em;
-  }
-
-  .brand-suffix {
-    color: #00E5FF;
     font-weight: 900;
+    letter-spacing: 0.06em;
+    color: #ffffff;
+    margin: 0;
+    text-shadow: 0 0 8px rgba(0, 229, 255, 0.2);
   }
 
-  .version-tag {
-    font-size: 9px;
-    font-family: var(--font-mono);
-    color: hsl(var(--text-faint));
-    background: rgba(255, 255, 255, 0.04);
-    padding: 2px 6px;
-    border-radius: 4px;
-    margin-left: 4px;
+  .logo-text span {
+    color: #00E5FF;
   }
 
-  /* Toolbar adds */
-  .toolbar {
-    display: flex;
-    gap: 8px;
-  }
-
-  .tool-btn {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: var(--radius-md);
-    color: hsl(var(--text-muted));
-    font-family: var(--font-display);
-    font-size: 11px;
-    font-weight: 600;
-    padding: 8px 14px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    transition: all 0.25s ease;
-  }
-
-  .tool-btn:hover {
-    color: hsl(var(--text-bright));
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.15);
-  }
-
-  .add-input:hover { border-color: rgba(0, 229, 255, 0.4); }
-  .add-scrubber:hover { border-color: rgba(243, 154, 25, 0.4); }
-  .add-prompt:hover { border-color: rgba(141, 87, 235, 0.4); }
-  .add-output:hover { border-color: rgba(16, 185, 129, 0.4); }
-
-  /* Execution Panel */
-  .execution-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .template-btn {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: var(--radius-md);
-    width: 36px;
-    height: 36px;
-    color: hsl(var(--text-muted));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .template-btn:hover {
-    color: hsl(var(--text-bright));
-    background: rgba(255, 255, 255, 0.08);
-  }
-
-  .run-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    min-width: 140px;
-    justify-content: center;
-    height: 36px;
-    padding: 0 16px;
-  }
-
-  .btn-spinner {
-    width: 12px;
-    height: 12px;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    border-top-color: white;
-    border-radius: 50%;
-    animation: btnSpin 0.6s linear infinite;
-  }
-
-  @keyframes btnSpin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  /* View Controls overlays */
-  .view-controls {
-    position: fixed;
-    bottom: 24px;
-    left: 24px;
-    height: 38px;
-    display: flex;
-    align-items: center;
-    padding: 0 8px;
-    border-radius: var(--radius-md);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    z-index: 100;
-  }
-
-  .view-controls button {
+  .help-btn {
     background: transparent;
     border: none;
-    width: 28px;
-    height: 28px;
+    color: hsl(var(--text-muted));
+    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: hsl(var(--text-muted));
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.2s ease;
+    padding: 6px;
+    border-radius: 50%;
+    transition: all 0.2s;
   }
 
-  .view-controls button:hover {
-    color: hsl(var(--text-bright));
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .view-controls button.active {
+  .help-btn:hover, .help-btn.active {
     color: #00E5FF;
     background: rgba(0, 229, 255, 0.06);
   }
 
-  .zoom-percent {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: hsl(var(--text-faint));
-    padding: 0 6px;
-    min-width: 32px;
-    text-align: center;
+  /* Stats Dashboard */
+  .stats-dashboard {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    padding: 12px 20px;
+    background: rgba(0, 0, 0, 0.15);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   }
 
-  .divider {
-    width: 1px;
-    height: 16px;
-    background: rgba(255, 255, 255, 0.06);
-    margin: 0 4px;
-  }
-
-  /* Help Card overlay */
-  .help-overlay {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 300px;
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    padding: 16px;
-    z-index: 100;
+  .stat-card {
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    padding: 6px 4px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .stat-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: hsl(var(--text-muted));
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .stat-value {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: #ffffff;
+  }
+
+  /* Level Instructions box */
+  .level-info {
+    padding: 10px 20px;
+    background: rgba(0, 229, 255, 0.01);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  }
+
+  .info-content {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .description-text {
+    font-size: 11px;
+    margin: 0;
+    color: hsl(var(--text-normal));
+    line-height: 1.35;
+  }
+
+  .description-text strong {
+    color: #00E5FF;
+  }
+
+  /* Canvas Container & SVG */
+  .canvas-container {
+    flex-grow: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    position: relative;
+  }
+
+  .svg-canvas {
+    width: 100%;
+    aspect-ratio: 1;
+    background: rgba(5, 8, 16, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 20px;
+    box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.7);
+    overflow: visible;
+    touch-action: none; /* Crucial for preventing scroll gestures while dragging */
+  }
+
+  /* Vector wire styles */
+  .edge {
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    transition: stroke 0.2s ease, filter 0.2s ease;
+  }
+
+  .edge-intersecting {
+    stroke: #FF3366;
+    filter: url(#glow-pink);
+  }
+
+  .edge-clean {
+    stroke: #00E5FF;
+    filter: url(#glow-cyan);
+  }
+
+  /* Vertex point styling */
+  .vertex-group {
+    cursor: grab;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  .vertex-group:active {
+    cursor: grabbing;
+  }
+
+  .vertex-glow {
+    fill: rgba(0, 229, 255, 0.06);
+    stroke: transparent;
+    transition: r 0.2s ease, fill 0.2s ease;
+  }
+
+  .vertex-group:hover .vertex-glow {
+    r: 22px;
+    fill: rgba(0, 229, 255, 0.12);
+  }
+
+  .vertex-point {
+    fill: #060912;
+    stroke: #00E5FF;
+    stroke-width: 2.5;
+    transition: stroke-width 0.2s, stroke 0.2s, r 0.2s;
+  }
+
+  .vertex-group:hover .vertex-point {
+    stroke-width: 3.5;
+    r: 9.5px;
+    stroke: #ffffff;
+    filter: drop-shadow(0 0 4px #00E5FF);
+  }
+
+  .vertex-group.dragging .vertex-point {
+    stroke: #FF3366;
+    stroke-width: 4;
+    r: 10px;
+    filter: drop-shadow(0 0 6px #FF3366);
+  }
+
+  .vertex-group.dragging .vertex-glow {
+    fill: rgba(255, 51, 102, 0.12);
+    r: 24px;
+  }
+
+  /* Dropdown and reset button controls */
+  .level-select-container {
+    padding: 12px 20px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.03);
+    background: rgba(0, 0, 0, 0.08);
+  }
+
+  .level-select {
+    flex-grow: 1;
+    background: rgba(15, 20, 34, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    font-size: 11px;
+    color: #ffffff;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .level-select:focus {
+    border-color: #00E5FF;
+  }
+
+  .reset-btn {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-md);
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: hsl(var(--text-muted));
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .reset-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  /* Help Overlay (Internal slide panel) */
+  .help-panel {
+    position: absolute;
+    inset: 60px 15px 15px;
+    background: rgba(8, 12, 22, 0.95);
+    border: 1px solid rgba(0, 229, 255, 0.15);
+    border-radius: 20px;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    animation: scaleUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
   .help-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    margin-bottom: 16px;
   }
 
   .help-title {
     font-family: var(--font-display);
-    font-size: 12px;
-    font-weight: 600;
-    color: hsl(var(--text-bright));
+    font-size: 15px;
+    font-weight: 700;
+    color: #ffffff;
     display: flex;
     align-items: center;
     gap: 6px;
   }
 
-  .close-help {
+  .close-help-btn {
     background: transparent;
     border: none;
-    color: hsl(var(--text-faint));
+    color: hsl(var(--text-muted));
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 4px;
+    border-radius: 50%;
+    transition: all 0.2s;
   }
 
-  .close-help:hover {
-    color: hsl(var(--text-bright));
+  .close-help-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #ffffff;
   }
 
-  .help-steps {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+  .help-body {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+    overflow-y: auto;
   }
 
-  .help-steps li {
+  .instruction-item {
     display: flex;
-    gap: 10px;
+    gap: 12px;
     align-items: flex-start;
   }
 
-  .step-num {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+  .step-badge {
+    background: rgba(0, 229, 255, 0.08);
+    border: 1px solid rgba(0, 229, 255, 0.2);
     color: #00E5FF;
-    border-radius: 4px;
-    width: 16px;
-    height: 16px;
-    font-size: 9px;
-    font-family: var(--font-mono);
+    border-radius: 6px;
+    width: 20px;
+    height: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
     flex-shrink: 0;
-    margin-top: 2px;
   }
 
-  .help-steps span {
-    font-size: 11px;
+  .instruction-item p {
+    font-size: 12px;
+    line-height: 1.45;
     color: hsl(var(--text-normal));
-    line-height: 1.4;
+    margin: 0;
   }
 
-  .help-footer {
+  .text-pink {
+    color: #FF3366;
+    font-weight: 600;
+  }
+
+  .text-cyan {
+    color: #00E5FF;
+    font-weight: 600;
+  }
+
+  /* Victory Modal Backdrop */
+  .win-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(3, 7, 18, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    padding: 20px;
+    animation: fadeIn 0.25s ease-out;
+  }
+
+  .win-modal {
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(0, 229, 255, 0.2);
+    border-radius: 28px;
+    padding: 30px 20px;
+    width: 100%;
+    max-width: 340px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5),
+                0 0 60px rgba(0, 229, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 14px;
+    animation: scaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .win-icon-wrapper {
+    background: rgba(0, 229, 255, 0.08);
+    border: 1px solid rgba(0, 229, 255, 0.25);
+    border-radius: 50%;
+    width: 72px;
+    height: 72px;
     display: flex;
     align-items: center;
-    gap: 6px;
-    background: rgba(0, 229, 255, 0.03);
-    border: 1px solid rgba(0, 229, 255, 0.08);
-    padding: 8px;
-    border-radius: 6px;
+    justify-content: center;
+    animation: pulse-glow 2s infinite ease-in-out;
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% {
+      box-shadow: 0 0 10px rgba(0, 229, 255, 0.1);
+      transform: scale(1);
+    }
+    50% {
+      box-shadow: 0 0 25px rgba(0, 229, 255, 0.3);
+      transform: scale(1.04);
+    }
+  }
+
+  .win-title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 900;
+    color: #ffffff;
+    letter-spacing: 0.06em;
+    margin: 0;
+    text-shadow: 0 0 12px rgba(0, 229, 255, 0.2);
+  }
+
+  .win-subtitle {
+    font-size: 12px;
+    color: hsl(var(--text-muted));
+    margin: -6px 0 0 0;
+  }
+
+  /* Victory stats */
+  .win-stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    width: 100%;
+    margin: 6px 0;
+  }
+
+  .win-stat-item {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 12px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .win-stat-label {
     font-size: 9px;
-    color: #00E5FF;
+    color: hsl(var(--text-muted));
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+
+  .win-stat-val {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffffff;
+  }
+
+  /* Victory buttons */
+  .win-actions {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    margin-top: 6px;
+  }
+
+  .modal-btn {
+    padding: 10px 16px;
+    border-radius: 10px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+  }
+
+  .modal-btn.primary {
+    background: linear-gradient(135deg, #00E5FF 0%, #0088FF 100%);
+    border: none;
+    color: #030712;
+    box-shadow: 0 4px 12px rgba(0, 229, 255, 0.25);
+  }
+
+  .modal-btn.primary:hover {
+    transform: translateY(-1.5px);
+    box-shadow: 0 6px 16px rgba(0, 229, 255, 0.4);
+  }
+
+  .modal-btn.secondary {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+  }
+
+  .modal-btn.secondary:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .completion-badge {
+    background: rgba(16, 185, 129, 0.08);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+    color: #10b981;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 8px 16px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.1);
+  }
+
+  /* Animations definitions */
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes scaleUp {
+    from { transform: scale(0.92); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
   }
 </style>

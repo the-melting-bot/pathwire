@@ -1,362 +1,289 @@
 import { writable, get } from 'svelte/store';
-import type { Node, Connection, NodeType } from './types';
+import type { Vertex, Edge, Level } from './types';
 
-// Canvas Zoom & Pan
-export const zoom = writable<number>(1);
-export const panX = writable<number>(0);
-export const panY = writable<number>(0);
+// Game State Stores
+export const currentLevelId = writable<number>(1);
+export const gameWon = writable<boolean>(false);
+export const moves = writable<number>(0);
+export const timeElapsed = writable<number>(0); // in seconds
+export const isRunning = writable<boolean>(false); // timer active
 
-// Node Editor Data
-export const nodes = writable<Node[]>([]);
-export const connections = writable<Connection[]>([]);
-export const selectedNodeId = writable<string | null>(null);
+export const vertices = writable<Vertex[]>([]);
+export const edges = writable<Edge[]>([]);
 
-// Connection Drag State
-export interface DraggingConnection {
-  fromNodeId: string;
-  fromPortId: string;
-  startX: number;
-  startY: number;
-  currentX: number;
-  currentY: number;
-}
-export const draggingConnection = writable<DraggingConnection | null>(null);
-
-// Simulation/Execution State
-export const isRunning = writable<boolean>(false);
-
-// Unique ID helper
-function uuid(): string {
-  return Math.random().toString(36).substring(2, 9);
-}
+// Timer interval reference
+let timerInterval: any = null;
 
 // ---------------------------------------------------------
-// Node Templates & Management
+// Levels Database
 // ---------------------------------------------------------
-export function addNode(type: NodeType, x: number, y: number) {
-  const id = `node-${uuid()}`;
-  let newNode: Node;
-
-  switch (type) {
-    case 'input':
-      newNode = {
-        id,
-        type,
-        name: 'Source Text',
-        x,
-        y,
-        inputs: [],
-        outputs: [{ id: 'out', name: 'text', type: 'text' }],
-        status: 'idle',
-        params: { text: 'Welcome to Pathwire.ai - Connect nodes and run logic!' },
-        inputValues: {},
-        outputValues: {}
-      };
-      break;
-
-    case 'scrubber':
-      newNode = {
-        id,
-        type,
-        name: 'Text Scrubber',
-        x,
-        y,
-        inputs: [{ id: 'in', name: 'text', type: 'text' }],
-        outputs: [{ id: 'out', name: 'clean text', type: 'text' }],
-        status: 'idle',
-        params: { mode: 'clean-whitespace' }, // 'clean-whitespace' | 'uppercase' | 'strip-emojis' | 'slugify'
-        inputValues: { in: '' },
-        outputValues: { out: '' }
-      };
-      break;
-
-    case 'prompt':
-      newNode = {
-        id,
-        type,
-        name: 'Gemini AI Prompt',
-        x,
-        y,
-        inputs: [{ id: 'in', name: 'context', type: 'text' }],
-        outputs: [{ id: 'out', name: 'response', type: 'text' }],
-        status: 'idle',
-        params: { prompt: 'Summarize the input text in one punchy sentence.' },
-        inputValues: { in: '' },
-        outputValues: { out: '' }
-      };
-      break;
-
-    case 'output':
-      newNode = {
-        id,
-        type,
-        name: 'Terminal Output',
-        x,
-        y,
-        inputs: [{ id: 'in', name: 'data', type: 'text' }],
-        outputs: [],
-        status: 'idle',
-        params: {},
-        inputValues: { in: '' },
-        outputValues: {}
-      };
-      break;
+export const levels: Level[] = [
+  {
+    id: 1,
+    name: "The Crossroad",
+    description: "Drag the vertices to untangle the square. When no lines cross, they will turn glowing cyan.",
+    vertices: [
+      { id: "v1", x: 100, y: 100 },
+      { id: "v2", x: 300, y: 100 },
+      { id: "v3", x: 100, y: 300 },
+      { id: "v4", x: 300, y: 300 }
+    ],
+    edges: [
+      { id: "e1", from: "v1", to: "v4" }, // Crossed diagonal
+      { id: "e2", from: "v2", to: "v3" }, // Crossed diagonal
+      { id: "e3", from: "v1", to: "v2" },
+      { id: "e4", from: "v3", to: "v4" },
+      { id: "e5", from: "v1", to: "v3" },
+      { id: "e6", from: "v2", to: "v4" }
+    ]
+  },
+  {
+    id: 2,
+    name: "Nebula Star",
+    description: "This 5-point star is tangled. Rearrange the vertices into a circle to untangle all crossing paths.",
+    vertices: [
+      { id: "v0", x: 200, y: 80 },
+      { id: "v1", x: 310, y: 160 },
+      { id: "v2", x: 270, y: 290 },
+      { id: "v3", x: 130, y: 290 },
+      { id: "v4", x: 90, y: 160 }
+    ],
+    edges: [
+      { id: "e1", from: "v0", to: "v2" },
+      { id: "e2", from: "v2", to: "v4" },
+      { id: "e3", from: "v4", to: "v1" },
+      { id: "e4", from: "v1", to: "v3" },
+      { id: "e5", from: "v3", to: "v0" },
+      // Outer ring
+      { id: "e6", from: "v0", to: "v1" },
+      { id: "e7", from: "v1", to: "v2" },
+      { id: "e8", from: "v3", to: "v4" }
+    ]
+  },
+  {
+    id: 3,
+    name: "The Hypercube",
+    description: "A 3D cube projection can be drawn flat. Place the inner square neatly inside the outer square.",
+    vertices: [
+      // Outer square
+      { id: "v0", x: 70, y: 70 },
+      { id: "v1", x: 330, y: 70 },
+      { id: "v2", x: 330, y: 330 },
+      { id: "v3", x: 70, y: 330 },
+      // Inner square (scrambled/crossed)
+      { id: "v4", x: 240, y: 130 },
+      { id: "v5", x: 140, y: 230 },
+      { id: "v6", x: 240, y: 230 },
+      { id: "v7", x: 140, y: 130 }
+    ],
+    edges: [
+      // Outer square
+      { id: "e1", from: "v0", to: "v1" },
+      { id: "e2", from: "v1", to: "v2" },
+      { id: "e3", from: "v2", to: "v3" },
+      { id: "e4", from: "v3", to: "v0" },
+      // Inner square
+      { id: "e5", from: "v4", to: "v5" },
+      { id: "e6", from: "v5", to: "v6" },
+      { id: "e7", from: "v6", to: "v7" },
+      { id: "e8", from: "v7", to: "v4" },
+      // Inter-connections
+      { id: "e9", from: "v0", to: "v4" },
+      { id: "e10", from: "v1", to: "v5" },
+      { id: "e11", from: "v2", to: "v6" },
+      { id: "e12", from: "v3", to: "v7" }
+    ]
+  },
+  {
+    id: 4,
+    name: "Double Pyramid",
+    description: "This 3D double pyramid has complex intersecting faces. Disperse the points to find the flat web.",
+    vertices: [
+      { id: "v0", x: 200, y: 60 },
+      { id: "v1", x: 320, y: 180 },
+      { id: "v2", x: 260, y: 320 },
+      { id: "v3", x: 140, y: 320 },
+      { id: "v4", x: 80, y: 180 },
+      { id: "v5", x: 200, y: 200 }
+    ],
+    edges: [
+      { id: "e1", from: "v0", to: "v1" },
+      { id: "e2", from: "v1", to: "v2" },
+      { id: "e3", from: "v2", to: "v3" },
+      { id: "e4", from: "v3", to: "v4" },
+      { id: "e5", from: "v4", to: "v0" },
+      // Connect to center V5
+      { id: "e6", from: "v0", to: "v5" },
+      { id: "e7", from: "v1", to: "v5" },
+      { id: "e8", from: "v2", to: "v5" },
+      { id: "e9", from: "v3", to: "v5" },
+      { id: "e10", from: "v4", to: "v5" }
+    ]
+  },
+  {
+    id: 5,
+    name: "Quantum Lattice",
+    description: "Final puzzle! 10 interconnected nodes forming a complex mesh. Solve this to complete the game.",
+    vertices: [
+      // Outer ring
+      { id: "v0", x: 100, y: 120 },
+      { id: "v1", x: 280, y: 80 },
+      { id: "v2", x: 320, y: 200 },
+      { id: "v3", x: 220, y: 330 },
+      { id: "v4", x: 80, y: 270 },
+      // Inner ring (tangled)
+      { id: "v5", x: 210, y: 140 },
+      { id: "v6", x: 140, y: 240 },
+      { id: "v7", x: 250, y: 240 },
+      { id: "v8", x: 120, y: 160 },
+      { id: "v9", x: 260, y: 150 }
+    ],
+    edges: [
+      // Outer Ring
+      { id: "e1", from: "v0", to: "v1" },
+      { id: "e2", from: "v1", to: "v2" },
+      { id: "e3", from: "v2", to: "v3" },
+      { id: "e4", from: "v3", to: "v4" },
+      { id: "e5", from: "v4", to: "v0" },
+      // Inner Ring
+      { id: "e6", from: "v5", to: "v6" },
+      { id: "e7", from: "v6", to: "v7" },
+      { id: "e8", from: "v7", to: "v8" },
+      { id: "e9", from: "v8", to: "v9" },
+      { id: "e10", from: "v9", to: "v5" },
+      // Bridges
+      { id: "e11", from: "v0", to: "v5" },
+      { id: "e12", from: "v1", to: "v6" },
+      { id: "e13", from: "v2", to: "v7" },
+      { id: "e14", from: "v3", to: "v8" },
+      { id: "e15", from: "v4", to: "v9" },
+      // Cross-cuts to make it harder
+      { id: "e16", from: "v0", to: "v7" },
+      { id: "e17", from: "v2", to: "v5" }
+    ]
   }
-
-  nodes.update((prev) => [...prev, newNode]);
-  selectedNodeId.set(id);
-}
-
-export function deleteNode(nodeId: string) {
-  // Remove node
-  nodes.update((prev) => prev.filter((n) => n.id !== nodeId));
-  // Remove associated connections
-  connections.update((prev) =>
-    prev.filter((c) => c.fromNodeId !== nodeId && c.toNodeId !== nodeId)
-  );
-  if (get(selectedNodeId) === nodeId) {
-    selectedNodeId.set(null);
-  }
-}
-
-// ---------------------------------------------------------
-// Connections Management
-// ---------------------------------------------------------
-export function startDraggingConnection(
-  nodeId: string,
-  portId: string,
-  startX: number,
-  startY: number
-) {
-  draggingConnection.set({
-    fromNodeId: nodeId,
-    fromPortId: portId,
-    startX,
-    startY,
-    currentX: startX,
-    currentY: startY
-  });
-}
-
-export function updateDraggingConnection(currentX: number, currentY: number) {
-  draggingConnection.update((state) => {
-    if (!state) return null;
-    return { ...state, currentX, currentY };
-  });
-}
-
-export function cancelDraggingConnection() {
-  draggingConnection.set(null);
-}
-
-export function completeDraggingConnection(toNodeId: string, toPortId: string) {
-  const drag = get(draggingConnection);
-  if (!drag) return;
-
-  // Prevent connecting to self
-  if (drag.fromNodeId === toNodeId) {
-    draggingConnection.set(null);
-    return;
-  }
-
-  // Remove existing connections to target input port (since input ports only take 1 input)
-  connections.update((prev) =>
-    prev.filter((c) => !(c.toNodeId === toNodeId && c.toPortId === toPortId))
-  );
-
-  const newConn: Connection = {
-    id: `conn-${uuid()}`,
-    fromNodeId: drag.fromNodeId,
-    fromPortId: drag.fromPortId,
-    toNodeId,
-    toPortId
-  };
-
-  connections.update((prev) => [...prev, newConn]);
-  draggingConnection.set(null);
-}
-
-export function deleteConnection(connId: string) {
-  connections.update((prev) => prev.filter((c) => c.id !== connId));
-}
-
-// ---------------------------------------------------------
-// Mock Logic Execution & Core Solver Engine
-// ---------------------------------------------------------
-const mockScrubbers: Record<string, (val: string) => string> = {
-  'clean-whitespace': (v) => v.replace(/\s+/g, ' ').trim(),
-  'uppercase': (v) => v.toUpperCase(),
-  'strip-emojis': (v) => v.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, ''),
-  'slugify': (v) => v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
-};
-
-const mockAiResponses = [
-  "✨ Summary: Data successfully piped, parsed, and scrubbed through the active workspace.",
-  "🚀 Insight: The execution flow has reached its terminal node with high confidence signals.",
-  "🤖 Node Analyzer: Automated pipelines are running efficiently at 60fps.",
-  "💡 Vision: A simple input can be transformed into complex logical outputs."
 ];
 
-async function executeNode(node: Node): Promise<Record<string, string>> {
-  // Update node state to running
-  nodes.update((list) =>
-    list.map((n) => (n.id === node.id ? { ...n, status: 'running' } : n))
-  );
+// ---------------------------------------------------------
+// 2D Line Segment Intersection Logic
+// ---------------------------------------------------------
+function checkLineIntersection(
+  p1: Vertex,
+  p2: Vertex,
+  p3: Vertex,
+  p4: Vertex
+): boolean {
+  // If they share a vertex, they do not cross in the mathematical game sense
+  if (
+    p1.id === p3.id ||
+    p1.id === p4.id ||
+    p2.id === p3.id ||
+    p2.id === p4.id
+  ) {
+    return false;
+  }
 
-  // Simulate networking/AI crunch time latency
-  await new Promise((resolve) => setTimeout(resolve, 800));
+  const det = (p2.x - p1.x) * (p4.y - p3.y) - (p2.y - p1.y) * (p4.x - p3.x);
+  if (det === 0) return false; // Parallel or collinear
 
-  try {
-    const outputs: Record<string, string> = {};
+  const u = ((p3.x - p1.x) * (p4.y - p3.y) - (p3.y - p1.y) * (p4.x - p3.x)) / det;
+  const v = ((p3.x - p1.x) * (p2.y - p1.y) - (p3.y - p1.y) * (p2.x - p1.x)) / det;
 
-    switch (node.type) {
-      case 'input':
-        outputs['out'] = node.params.text || '';
-        break;
+  // u and v must be strictly between 0 and 1 for an intersection inside segments
+  return u > 0 && u < 1 && v > 0 && v < 1;
+}
 
-      case 'scrubber': {
-        const inputVal = node.inputValues['in'] || '';
-        const mode = node.params.mode || 'clean-whitespace';
-        outputs['out'] = mockScrubbers[mode] ? mockScrubbers[mode](inputVal) : inputVal;
-        break;
+export function checkIntersections() {
+  const currentVertices = get(vertices);
+  const currentEdges = get(edges);
+  const vertexMap = new Map(currentVertices.map((v) => [v.id, v]));
+
+  // Reset intersection status
+  const updatedEdges = currentEdges.map((e) => ({ ...e, isIntersecting: false }));
+
+  // Run O(E^2) intersection sweeps
+  for (let i = 0; i < updatedEdges.length; i++) {
+    for (let j = i + 1; j < updatedEdges.length; j++) {
+      const e1 = updatedEdges[i];
+      const e2 = updatedEdges[j];
+
+      const p1 = vertexMap.get(e1.from);
+      const p2 = vertexMap.get(e1.to);
+      const p3 = vertexMap.get(e2.from);
+      const p4 = vertexMap.get(e2.to);
+
+      if (p1 && p2 && p3 && p4) {
+        if (checkLineIntersection(p1, p2, p3, p4)) {
+          e1.isIntersecting = true;
+          e2.isIntersecting = true;
+        }
       }
-
-      case 'prompt': {
-        const context = node.inputValues['in'] || '';
-        const prompt = node.params.prompt || '';
-        const randomAi = mockAiResponses[Math.floor(Math.random() * mockAiResponses.length)];
-        outputs['out'] = `[AI Processed Context: "${context.substring(0, 30)}..."]\nInstruction: "${prompt}"\n\n${randomAi}`;
-        break;
-      }
-
-      case 'output':
-        // Output node displays the output directly, outputs nothing downstream
-        break;
     }
+  }
 
-    nodes.update((list) =>
-      list.map((n) =>
-        n.id === node.id
-          ? { ...n, status: 'success', outputValues: outputs }
-          : n
-      )
-    );
+  edges.set(updatedEdges);
 
-    return outputs;
-  } catch (err) {
-    nodes.update((list) =>
-      list.map((n) =>
-        n.id === node.id
-          ? { ...n, status: 'error', errorMessage: String(err) }
-          : n
-      )
-    );
-    throw err;
+  // Victory check: zero intersecting lines
+  const hasIntersections = updatedEdges.some((e) => e.isIntersecting);
+  if (!hasIntersections && updatedEdges.length > 0 && !get(gameWon)) {
+    gameWon.set(true);
+    stopTimer();
   }
 }
 
-// Depth-First Solver to flow data step by step
-export async function runWorkflow() {
-  if (get(isRunning)) return;
+// ---------------------------------------------------------
+// Game State Manager Functions
+// ---------------------------------------------------------
+export function loadLevel(levelId: number) {
+  const level = levels.find((l) => l.id === levelId);
+  if (!level) return;
+
+  // Deep clone level nodes & connections to ensure fresh load
+  const clonedVertices = JSON.parse(JSON.stringify(level.vertices));
+  const clonedEdges = JSON.parse(JSON.stringify(level.edges));
+
+  // Scramble/jitter vertex coordinates slightly so it is always a puzzle
+  const scrambledVertices = clonedVertices.map((v: Vertex, idx: number) => {
+    // Offset slightly by level/index based math so the user always has a puzzle to solve
+    const angle = (idx * 2 * Math.PI) / clonedVertices.length + levelId;
+    const radius = 100 + (idx % 2) * 30;
+    return {
+      ...v,
+      x: 200 + Math.cos(angle) * radius,
+      y: 200 + Math.sin(angle) * radius
+    };
+  });
+
+  vertices.set(scrambledVertices);
+  edges.set(clonedEdges);
+  currentLevelId.set(levelId);
+  gameWon.set(false);
+  moves.set(0);
+  timeElapsed.set(0);
+
+  checkIntersections();
+  startTimer();
+}
+
+export function resetLevel() {
+  loadLevel(get(currentLevelId));
+}
+
+// ---------------------------------------------------------
+// Timer Management
+// ---------------------------------------------------------
+export function startTimer() {
+  stopTimer();
   isRunning.set(true);
+  timerInterval = setInterval(() => {
+    timeElapsed.update((t) => t + 1);
+  }, 1000);
+}
 
-  // 1. Reset all node statuses to idle
-  nodes.update((list) =>
-    list.map((n) => ({
-      ...n,
-      status: 'idle',
-      inputValues: {},
-      outputValues: {},
-      errorMessage: undefined
-    }))
-  );
-
-  const allNodes = get(nodes);
-  const allConns = get(connections);
-
-  // Helper to find downstream nodes
-  const getDownstream = (nodeId: string) => {
-    return allConns.filter((c) => c.fromNodeId === nodeId);
-  };
-
-  // Start with root nodes (nodes with 0 inputs)
-  const roots = allNodes.filter((n) => n.inputs.length === 0);
-
-  // Track completed nodes to prevent double execution loops
-  const completed = new Set<string>();
-
-  // Process a queue of nodes to allow parallel branches
-  let queue = [...roots];
-
-  while (queue.length > 0) {
-    const currentNode = queue.shift();
-    if (!currentNode) continue;
-
-    // Check if node is ready to run (all its connected inputs have output values)
-    const inputsConnected = allConns.filter((c) => c.toNodeId === currentNode.id);
-    const ready = inputsConnected.every((c) => {
-      const parent = get(nodes).find((n) => n.id === c.fromNodeId);
-      return parent && completed.has(parent.id);
-    });
-
-    if (!ready && currentNode.inputs.length > 0) {
-      // Put back at the end of queue to wait for upstream outputs
-      queue.push(currentNode);
-      // Failsafe to prevent infinite loops if there is a cycle (though editor disallows cycling)
-      continue;
-    }
-
-    // Populate inputs from parent outputs
-    const inputs: Record<string, string> = {};
-    for (const conn of inputsConnected) {
-      const parent = get(nodes).find((n) => n.id === conn.fromNodeId);
-      if (parent && parent.outputValues[conn.fromPortId]) {
-        inputs[conn.toPortId] = parent.outputValues[conn.fromPortId];
-      }
-    }
-
-    nodes.update((list) =>
-      list.map((n) =>
-        n.id === currentNode.id ? { ...n, inputValues: inputs } : n
-      )
-    );
-
-    // Execute the node
-    try {
-      const outputs = await executeNode(currentNode);
-      completed.add(currentNode.id);
-
-      // Pulse outgoing connections visually
-      const outgoing = getDownstream(currentNode.id);
-      if (outgoing.length > 0) {
-        connections.update((list) =>
-          list.map((c) =>
-            c.fromNodeId === currentNode.id ? { ...c, isPulsing: true } : c
-          )
-        );
-
-        // Wait for visual pulse propagation (600ms CSS transition duration)
-        await new Promise((resolve) => setTimeout(resolve, 600));
-
-        connections.update((list) =>
-          list.map((c) =>
-            c.fromNodeId === currentNode.id ? { ...c, isPulsing: false } : c
-          )
-        );
-
-        // Add children to the queue
-        for (const conn of outgoing) {
-          const childNode = allNodes.find((n) => n.id === conn.toNodeId);
-          if (childNode && !queue.some((q) => q.id === childNode.id)) {
-            queue.push(childNode);
-          }
-        }
-      }
-    } catch {
-      // Stop execution on error
-      break;
-    }
-  }
-
+export function stopTimer() {
   isRunning.set(false);
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
 }
