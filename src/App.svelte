@@ -23,7 +23,8 @@
     Sparkles, 
     GitCommit, 
     FileCode, 
-    Info 
+    Info,
+    X
   } from '@lucide/svelte';
 
   let showHelp = $state(true);
