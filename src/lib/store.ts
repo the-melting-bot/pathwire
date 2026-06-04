@@ -159,7 +159,7 @@ export const levels: Level[] = [
       { id: "e14", from: "v3", to: "v8" },
       { id: "e15", from: "v4", to: "v9" },
       // Cross-cuts to make it harder
-      { id: "e16", from: "v0", to: "v7" }
+      { id: "e16", from: "v0", to: "v6" }
     ]
   }
 ];
@@ -289,8 +289,8 @@ const levelSolutions: Record<number, Vertex[]> = {
     { id: "v2", x: 330, y: 330 },
     { id: "v3", x: 70, y: 330 },
     { id: "v4", x: 150, y: 150 },
-    { id: "v5", x: 250, y: 150 },
-    { id: "v6", x: 250, y: 250 },
+    { id: "v5", x: 255, y: 150 },
+    { id: "v6", x: 255, y: 250 },
     { id: "v7", x: 150, y: 250 }
   ],
   4: [
@@ -302,16 +302,16 @@ const levelSolutions: Record<number, Vertex[]> = {
     { id: "v5", x: 200, y: 200 }
   ],
   5: [
-    { id: "v0", x: 350, y: 162 },
-    { id: "v1", x: 291, y: 350 },
-    { id: "v2", x: 81, y: 350 },
-    { id: "v3", x: 88, y: 142 },
-    { id: "v4", x: 281, y: 50 },
-    { id: "v5", x: 306, y: 183 },
-    { id: "v6", x: 252, y: 274 },
-    { id: "v7", x: 108, y: 277 },
-    { id: "v8", x: 128, y: 165 },
-    { id: "v9", x: 208, y: 111 }
+    { id: "v0", x: 340, y: 200 },
+    { id: "v1", x: 243, y: 67 },
+    { id: "v2", x: 87, y: 118 },
+    { id: "v3", x: 87, y: 282 },
+    { id: "v4", x: 243, y: 333 },
+    { id: "v5", x: 274, y: 207 },
+    { id: "v6", x: 256, y: 162 },
+    { id: "v7", x: 168, y: 172 },
+    { id: "v8", x: 160, y: 238 },
+    { id: "v9", x: 226, y: 259 }
   ]
 };
 
