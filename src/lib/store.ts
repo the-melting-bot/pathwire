@@ -7,6 +7,7 @@ export const gameWon = writable<boolean>(false);
 export const moves = writable<number>(0);
 export const timeElapsed = writable<number>(0); // in seconds
 export const isRunning = writable<boolean>(false); // timer active
+export const isAnimatingSolve = writable<boolean>(false);
 
 export const vertices = writable<Vertex[]>([]);
 export const edges = writable<Edge[]>([]);
@@ -224,7 +225,7 @@ export function checkIntersections() {
 
   // Victory check: zero intersecting lines
   const hasIntersections = updatedEdges.some((e) => e.isIntersecting);
-  if (!hasIntersections && updatedEdges.length > 0 && !get(gameWon)) {
+  if (!hasIntersections && updatedEdges.length > 0 && !get(gameWon) && !get(isAnimatingSolve)) {
     gameWon.set(true);
     stopTimer();
   }
@@ -315,15 +316,55 @@ const levelSolutions: Record<number, Vertex[]> = {
 };
 
 export function solveCurrentLevel() {
+  if (get(isAnimatingSolve)) return;
+
   const levelId = get(currentLevelId);
   const solutionCoords = levelSolutions[levelId];
   if (!solutionCoords) return;
 
-  // Set the vertices to their solved coordinates
-  vertices.set(JSON.parse(JSON.stringify(solutionCoords)));
-  
-  // Recalculate intersections and victory check
-  checkIntersections();
+  // Stop the timer so the user's solve time is locked when they hit solve
+  stopTimer();
+  isAnimatingSolve.set(true);
+
+  const startVertices = get(vertices);
+  const targetVertices = JSON.parse(JSON.stringify(solutionCoords)) as Vertex[];
+
+  const duration = 2000; // 2 seconds animation
+  const startTime = performance.now();
+
+  function animate(currentTime: number) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+
+    // Easing function: easeInOutCubic
+    const ease = progress < 0.5
+      ? 4 * progress * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+    // Interpolate vertices
+    const currentVertices = startVertices.map(startV => {
+      const targetV = targetVertices.find(v => v.id === startV.id);
+      if (!targetV) return startV;
+      return {
+        id: startV.id,
+        x: startV.x + (targetV.x - startV.x) * ease,
+        y: startV.y + (targetV.y - startV.y) * ease
+      };
+    });
+
+    vertices.set(currentVertices);
+    checkIntersections(); // Recalculate crossings so lines change color dynamically!
+
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      isAnimatingSolve.set(false);
+      // Now trigger victory check
+      checkIntersections();
+    }
+  }
+
+  requestAnimationFrame(animate);
 }
 
 // ---------------------------------------------------------

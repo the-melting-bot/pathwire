@@ -12,7 +12,8 @@
     loadLevel,
     resetLevel,
     checkIntersections,
-    solveCurrentLevel
+    solveCurrentLevel,
+    isAnimatingSolve
   } from './lib/store';
   import { 
     RefreshCw, 
@@ -62,8 +63,8 @@
     };
   }
 
-  // Drag and Drop event handlers
   function handlePointerDown(event: PointerEvent, id: string) {
+    if ($isAnimatingSolve) return;
     event.preventDefault();
     const el = event.currentTarget as HTMLElement | SVGElement;
     try {
@@ -153,6 +154,7 @@
         bind:this={svgElement}
         viewBox="0 0 400 400" 
         class="svg-canvas"
+        class:animating={$isAnimatingSolve}
       >
         <defs>
           <!-- Pink Neon Glow -->
@@ -533,6 +535,14 @@
     box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.7);
     overflow: visible;
     touch-action: none; /* Crucial for preventing scroll gestures while dragging */
+  }
+
+  .svg-canvas.animating {
+    cursor: default;
+  }
+
+  .svg-canvas.animating .vertex-group {
+    pointer-events: none;
   }
 
   /* Vector wire styles */
