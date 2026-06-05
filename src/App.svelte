@@ -116,7 +116,7 @@
     <header class="game-header">
       <div class="logo-area">
         <Gamepad2 size={22} style="color: #00E5FF; filter: drop-shadow(0 0 4px #00E5FF);" />
-        <h1 class="logo-text">PATH<span>WIRE</span></h1>
+        <h1 class="logo-text">LINE<span>TRICK</span></h1>
       </div>
       <button class="help-btn" onclick={() => showHelp = !showHelp} class:active={showHelp} title="How to play">
         <HelpCircle size={18} />
