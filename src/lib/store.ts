@@ -393,6 +393,11 @@ export function solveCurrentLevel() {
       requestAnimationFrame(animate);
     } else {
       isAnimatingSolve.set(false);
+      
+      // Append the final solved state to moveHistory so the replay can show the solved layout!
+      const solvedVertices = JSON.parse(JSON.stringify(targetVertices)) as Vertex[];
+      moveHistory.update(h => [...h, solvedVertices]);
+
       // Now trigger victory check
       checkIntersections();
     }

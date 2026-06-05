@@ -116,8 +116,8 @@
   function handleCelebrationClick() {
     showCelebration.set(false);
     
-    // If they solved using Auto-Solve (no moves recorded) or history is too short
-    if ($moves === 0 || $moveHistory.length < 2) {
+    // If history is too short to replay
+    if ($moveHistory.length < 2) {
       handleReplayComplete();
       return;
     }
