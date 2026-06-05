@@ -4,6 +4,8 @@
     levels,
     currentLevelId,
     gameWon,
+    showVictoryScreen,
+    isReplaying,
     moves,
     timeElapsed,
     isRunning,
@@ -13,7 +15,9 @@
     resetLevel,
     checkIntersections,
     solveCurrentLevel,
-    isAnimatingSolve
+    isAnimatingSolve,
+    recordSnapshot,
+    runSolveReplay
   } from './lib/store';
   import { 
     RefreshCw, 
@@ -36,7 +40,18 @@
 
   // Setup the first level on mount to start the game
   onMount(() => {
-    loadLevel(1);
+    loadLevel(0); // Load tutorial level by default
+  });
+
+  // Watch victory state to trigger the fast-forward solve replay
+  $effect(() => {
+    if ($gameWon && !$showVictoryScreen && !$isAnimatingSolve && !$isReplaying) {
+      runSolveReplay(() => {
+        showVictoryScreen.set(true);
+      });
+    } else if ($gameWon && $isAnimatingSolve) {
+      showVictoryScreen.set(true);
+    }
   });
 
   // Helper to format time as MM:SS
@@ -65,7 +80,7 @@
   }
 
   function handlePointerDown(event: PointerEvent, id: string) {
-    if ($isAnimatingSolve) return;
+    if ($isAnimatingSolve || $isReplaying) return;
     event.preventDefault();
     const el = event.currentTarget as HTMLElement | SVGElement;
     try {
@@ -82,6 +97,7 @@
     const { x, y } = getSvgCoords(event.clientX, event.clientY);
     vertices.update(vList => vList.map(v => v.id === id ? { ...v, x, y } : v));
     checkIntersections();
+    recordSnapshot();
   }
 
   function handlePointerUp(event: PointerEvent, id: string) {
@@ -97,7 +113,7 @@
   }
 
   function nextLevel() {
-    if ($currentLevelId < levels.length) {
+    if ($currentLevelId < levels.length - 1) {
       loadLevel($currentLevelId + 1);
     }
   }
@@ -182,6 +198,16 @@
           </filter>
         </defs>
 
+        <!-- Tutorial Target Zone -->
+        {#if $currentLevelId === 0}
+          <g class="tutorial-target-group">
+            <circle cx="300" cy="120" r="24" class="tutorial-target-outer" />
+            <circle cx="300" cy="120" r="10" class="tutorial-target-core" />
+            <text x="300" y="85" text-anchor="middle" class="tutorial-target-label">TARGET</text>
+            <line x1="160" y1="120" x2="300" y2="120" class="tutorial-guide-line" />
+          </g>
+        {/if}
+
         <!-- Connection Wires (Edges) -->
         {#each $edges as edge (edge.id)}
           {@const fromV = $vertices.find(v => v.id === edge.from)}
@@ -203,6 +229,7 @@
           <g
             class="vertex-group"
             class:dragging={draggingVertexId === vertex.id}
+            class:tutorial-pulse={$currentLevelId === 0 && vertex.id === 'v4'}
             transform="translate({vertex.x}, {vertex.y})"
             onpointerdown={(e) => handlePointerDown(e, vertex.id)}
             onpointermove={(e) => handlePointerMove(e, vertex.id)}
@@ -221,13 +248,14 @@
         class="level-select" 
         value={$currentLevelId} 
         onchange={(e) => loadLevel(parseInt((e.target as HTMLSelectElement).value))}
+        disabled={$isAnimatingSolve || $isReplaying}
       >
         {#each levels as lvl}
           <option value={lvl.id}>Level {lvl.id}: {lvl.name}</option>
         {/each}
       </select>
       
-      <button class="reset-btn" onclick={resetLevel} title="Reset level layout">
+      <button class="reset-btn" onclick={resetLevel} title="Reset level layout" disabled={$isAnimatingSolve || $isReplaying}>
         <RefreshCw size={16} />
       </button>
     </div>
@@ -287,7 +315,7 @@
         
         <div class="help-solution-footer">
           <p class="solution-text">Stuck on this level? Let the game calibrate the optimal vertex coordinates for you.</p>
-          <button class="solve-btn" onclick={() => { showHelp = false; solveCurrentLevel(); }}>
+          <button class="solve-btn" onclick={() => { showHelp = false; solveCurrentLevel(); }} disabled={$isAnimatingSolve || $isReplaying}>
             <Wand2 size={13} style="margin-right: 6px; display: inline-block; vertical-align: middle;" /> Auto-Solve Puzzle
           </button>
         </div>
@@ -295,7 +323,7 @@
     {/if}
 
     <!-- Victory Screen Modal Overlay -->
-    {#if $gameWon}
+    {#if $showVictoryScreen}
       <div class="win-modal-backdrop">
         <div class="win-modal">
           <div class="win-icon-wrapper">
@@ -320,7 +348,7 @@
               Replay
             </button>
             
-            {#if $currentLevelId < levels.length}
+            {#if $currentLevelId < levels.length - 1}
               <button class="modal-btn primary" onclick={nextLevel}>
                 Next Level <ChevronRight size={16} style="margin-left: 4px;" />
               </button>
@@ -1045,5 +1073,79 @@
   .bot-icon {
     display: block;
     filter: drop-shadow(0 0 2px rgba(0, 229, 255, 0.2));
+  }
+
+  /* Interactive Tutorial (Level 0) Styling */
+  .tutorial-target-group {
+    pointer-events: none;
+  }
+
+  .tutorial-target-outer {
+    fill: rgba(0, 229, 255, 0.04);
+    stroke: #00E5FF;
+    stroke-width: 1.8;
+    stroke-dasharray: 4, 4;
+    transform-origin: 300px 120px;
+    animation: rotateTarget 12s linear infinite;
+  }
+
+  .tutorial-target-core {
+    fill: none;
+    stroke: #00E5FF;
+    stroke-width: 1.8;
+    opacity: 0.6;
+    animation: pulseCore 2s infinite ease-in-out;
+  }
+
+  .tutorial-target-label {
+    fill: #00E5FF;
+    font-family: var(--font-display);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.4));
+  }
+
+  .tutorial-guide-line {
+    stroke: rgba(0, 229, 255, 0.25);
+    stroke-width: 2.2;
+    stroke-dasharray: 6, 6;
+    animation: dashOffset 0.8s linear infinite;
+  }
+
+  /* Flash tangled node v4 in tutorial */
+  .tutorial-pulse .vertex-point {
+    stroke: #FF3366 !important;
+    animation: pulseNode 1.4s infinite ease-in-out;
+  }
+
+  .tutorial-pulse .vertex-glow {
+    fill: rgba(255, 51, 102, 0.12) !important;
+    animation: pulseGlow 1.4s infinite ease-in-out;
+  }
+
+  @keyframes rotateTarget {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes pulseCore {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50% { transform: scale(1.2); opacity: 0.8; }
+  }
+
+  @keyframes dashOffset {
+    from { stroke-dashoffset: 12; }
+    to { stroke-dashoffset: 0; }
+  }
+
+  @keyframes pulseNode {
+    0%, 100% { stroke-width: 2.5; r: 8px; filter: drop-shadow(0 0 2px #FF3366); }
+    50% { stroke-width: 4; r: 10px; filter: drop-shadow(0 0 8px #FF3366); }
+  }
+
+  @keyframes pulseGlow {
+    0%, 100% { r: 18px; fill: rgba(255, 51, 102, 0.05); }
+    50% { r: 25px; fill: rgba(255, 51, 102, 0.2); }
   }
 </style>

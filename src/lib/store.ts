@@ -2,8 +2,11 @@ import { writable, get } from 'svelte/store';
 import type { Vertex, Edge, Level } from './types';
 
 // Game State Stores
-export const currentLevelId = writable<number>(1);
+export const currentLevelId = writable<number>(0); // Start at Level 0 Tutorial!
 export const gameWon = writable<boolean>(false);
+export const showVictoryScreen = writable<boolean>(false);
+export const isReplaying = writable<boolean>(false);
+export const moveHistory = writable<Vertex[][]>([]);
 export const moves = writable<number>(0);
 export const timeElapsed = writable<number>(0); // in seconds
 export const isRunning = writable<boolean>(false); // timer active
@@ -19,6 +22,23 @@ let timerInterval: any = null;
 // Levels Database
 // ---------------------------------------------------------
 export const levels: Level[] = [
+  {
+    id: 0,
+    name: "Calibration Tutorial",
+    description: "Welcome to Linetrick! Drag the flashing node to the highlighted target to untangle the wires.",
+    vertices: [
+      { id: "v1", x: 100, y: 200 },
+      { id: "v2", x: 220, y: 200 },
+      { id: "v3", x: 160, y: 300 },
+      { id: "v4", x: 160, y: 120 } // Tangled node in middle
+    ],
+    edges: [
+      { id: "e1", from: "v1", to: "v2" }, // horizontal
+      { id: "e2", from: "v3", to: "v4" }, // vertical, crossing e1!
+      { id: "e3", from: "v1", to: "v3" },
+      { id: "e4", from: "v2", to: "v3" }
+    ]
+  },
   {
     id: 1,
     name: "The Crossroad",
@@ -225,7 +245,7 @@ export function checkIntersections() {
 
   // Victory check: zero intersecting lines
   const hasIntersections = updatedEdges.some((e) => e.isIntersecting);
-  if (!hasIntersections && updatedEdges.length > 0 && !get(gameWon) && !get(isAnimatingSolve)) {
+  if (!hasIntersections && updatedEdges.length > 0 && !get(gameWon) && !get(isAnimatingSolve) && !get(isReplaying)) {
     gameWon.set(true);
     stopTimer();
   }
@@ -242,8 +262,8 @@ export function loadLevel(levelId: number) {
   const clonedVertices = JSON.parse(JSON.stringify(level.vertices));
   const clonedEdges = JSON.parse(JSON.stringify(level.edges));
 
-  // Scramble/jitter vertex coordinates slightly so it is always a puzzle
-  const scrambledVertices = clonedVertices.map((v: Vertex, idx: number) => {
+  // Scramble/jitter vertex coordinates slightly so it is always a puzzle (except Level 0)
+  const scrambledVertices = levelId === 0 ? clonedVertices : clonedVertices.map((v: Vertex, idx: number) => {
     // Offset slightly by level/index based math so the user always has a puzzle to solve
     const angle = (idx * 2 * Math.PI) / clonedVertices.length + levelId;
     const radius = 100 + (idx % 2) * 30;
@@ -258,6 +278,13 @@ export function loadLevel(levelId: number) {
   edges.set(clonedEdges);
   currentLevelId.set(levelId);
   gameWon.set(false);
+  showVictoryScreen.set(false);
+  isReplaying.set(false);
+  
+  // Record initial snapshot
+  const initialClone = JSON.parse(JSON.stringify(scrambledVertices)) as Vertex[];
+  moveHistory.set([initialClone]);
+  
   moves.set(0);
   timeElapsed.set(0);
 
@@ -270,6 +297,12 @@ export function resetLevel() {
 }
 
 const levelSolutions: Record<number, Vertex[]> = {
+  0: [
+    { id: "v1", x: 100, y: 200 },
+    { id: "v2", x: 220, y: 200 },
+    { id: "v3", x: 160, y: 300 },
+    { id: "v4", x: 300, y: 120 }
+  ],
   1: [
     { id: "v1", x: 100, y: 100 },
     { id: "v2", x: 300, y: 100 },
@@ -384,4 +417,75 @@ export function stopTimer() {
     clearInterval(timerInterval);
     timerInterval = null;
   }
+}
+
+// ---------------------------------------------------------
+// Replay Recording & Playback Functions
+// ---------------------------------------------------------
+export function recordSnapshot() {
+  if (get(isReplaying) || get(isAnimatingSolve)) return;
+  const currentVertices = get(vertices);
+  const history = get(moveHistory);
+
+  if (history.length > 0) {
+    const last = history[history.length - 1];
+    let changed = false;
+    for (let i = 0; i < currentVertices.length; i++) {
+      const vCurr = currentVertices[i];
+      const vLast = last.find(v => v.id === vCurr.id);
+      if (!vLast || Math.abs(vCurr.x - vLast.x) > 0.5 || Math.abs(vCurr.y - vLast.y) > 0.5) {
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) return;
+  }
+
+  const clone = JSON.parse(JSON.stringify(currentVertices)) as Vertex[];
+  moveHistory.update(h => [...h, clone]);
+}
+
+export function runSolveReplay(onComplete: () => void) {
+  if (get(isReplaying)) return;
+
+  const history = get(moveHistory);
+  if (history.length < 2) {
+    onComplete();
+    return;
+  }
+
+  stopTimer();
+  isReplaying.set(true);
+
+  // We want the replay to take around 2.0 to 2.5 seconds
+  const targetDuration = 2000; // 2 seconds
+  const frameRate = 60;
+  const totalTargetFrames = (targetDuration / 1000) * frameRate; // 120 frames
+
+  const totalHistoryFrames = history.length;
+  const stepIncrement = Math.max(1, Math.ceil(totalHistoryFrames / totalTargetFrames));
+
+  let currentFrameIdx = 0;
+
+  function playNextFrame() {
+    if (currentFrameIdx >= totalHistoryFrames) {
+      // Set to final solved state
+      vertices.set(history[totalHistoryFrames - 1]);
+      checkIntersections();
+
+      setTimeout(() => {
+        isReplaying.set(false);
+        onComplete();
+      }, 300); // Brief pause at the end for user satisfaction
+      return;
+    }
+
+    vertices.set(history[currentFrameIdx]);
+    checkIntersections();
+
+    currentFrameIdx += stepIncrement;
+    requestAnimationFrame(playNextFrame);
+  }
+
+  requestAnimationFrame(playNextFrame);
 }
