@@ -28,6 +28,7 @@
     Info,
     Wand2
   } from '@lucide/svelte';
+  import InteractiveBackground from './lib/components/InteractiveBackground.svelte';
 
   let showHelp = $state(false);
   let svgElement: SVGSVGElement | null = $state(null);
@@ -104,6 +105,7 @@
 
 <main class="app-container">
   <!-- Interactive background elements -->
+  <InteractiveBackground />
   <div class="grid-pattern"></div>
   <div class="ambient-glows">
     <div class="glow-sphere pink"></div>
