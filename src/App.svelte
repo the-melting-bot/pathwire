@@ -230,6 +230,29 @@
       </button>
     </div>
 
+    <!-- Attribution Badge Footer -->
+    <footer class="game-footer">
+      <a href="https://themeltingbot.com" target="_blank" rel="noopener noreferrer" class="badge-link">
+        <div class="melting-bot-badge">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" class="bot-icon">
+            <!-- Antenna -->
+            <path d="M12 4V2" stroke="#00E5FF" stroke-width="1.8" stroke-linecap="round"/>
+            <circle cx="12" cy="1.5" r="0.8" fill="#00E5FF"/>
+            <!-- Head -->
+            <rect x="4.5" y="4.5" width="15" height="11" rx="2.5" stroke="#00E5FF" stroke-width="1.8" fill="#0e172a"/>
+            <!-- Eyes -->
+            <circle cx="9.5" cy="9.5" r="1.1" fill="#00E5FF"/>
+            <circle cx="14.5" cy="9.5" r="1.1" fill="#00E5FF"/>
+            <!-- Smile -->
+            <path d="M10.5 12.5 Q12 13.5 13.5 12.5" stroke="#00E5FF" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+            <!-- Melting drips -->
+            <path d="M6.5 15.5 C6.5 15.5, 6.5 18, 7.5 18 C8.5 18, 8.5 16.5, 9.5 16.5 C10.5 16.5, 10.5 20.5, 12 20.5 C13.5 20.5, 13.5 17.5, 14.5 17.5 C15.5 17.5, 15.5 19.5, 16.5 19.5 C17.5 19.5, 17.5 15.5, 17.5 15.5" stroke="#A855F7" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Built by The Melting Bot</span>
+        </div>
+      </a>
+    </footer>
+
     <!-- Help Screen Overlay -->
     {#if showHelp}
       <div class="help-panel glass">
@@ -973,5 +996,52 @@
 
   .solve-btn:active {
     transform: translateY(0);
+  }
+
+  /* Attribution Footer & Badge */
+  .game-footer {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 10px 20px 14px 20px;
+    background: rgba(0, 0, 0, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.02);
+  }
+
+  .badge-link {
+    text-decoration: none;
+    display: block;
+  }
+
+  .melting-bot-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    background: rgba(15, 23, 42, 0.65);
+    border: 1px solid #00E5FF;
+    border-radius: 9999px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.05);
+  }
+
+  .melting-bot-badge:hover {
+    background: rgba(15, 23, 42, 0.85);
+    box-shadow: 0 0 15px rgba(0, 229, 255, 0.25);
+    transform: translateY(-1px);
+    border-color: #ffffff;
+  }
+
+  .melting-bot-badge span {
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: 0.03em;
+  }
+
+  .bot-icon {
+    display: block;
+    filter: drop-shadow(0 0 2px rgba(0, 229, 255, 0.2));
   }
 </style>
