@@ -5,6 +5,7 @@
     currentLevelId,
     gameWon,
     showVictoryScreen,
+    showCelebration,
     isReplaying,
     moves,
     timeElapsed,
@@ -17,7 +18,9 @@
     solveCurrentLevel,
     isAnimatingSolve,
     recordSnapshot,
-    runSolveReplay
+    runSolveReplay,
+    runSlowReplay,
+    moveHistory
   } from './lib/store';
   import { 
     RefreshCw, 
@@ -43,13 +46,11 @@
     loadLevel(0); // Load tutorial level by default
   });
 
-  // Watch victory state to trigger the fast-forward solve replay
+  // Watch victory state to show the celebration popup
   $effect(() => {
-    if ($gameWon && !$showVictoryScreen && !$isAnimatingSolve && !$isReplaying) {
-      runSolveReplay(() => {
-        showVictoryScreen.set(true);
-      });
-    } else if ($gameWon && $isAnimatingSolve) {
+    if ($gameWon && !$showVictoryScreen && !$isAnimatingSolve && !$isReplaying && !$showCelebration) {
+      showCelebration.set(true);
+    } else if ($gameWon && $isAnimatingSolve && !$showVictoryScreen) {
       showVictoryScreen.set(true);
     }
   });
@@ -80,7 +81,7 @@
   }
 
   function handlePointerDown(event: PointerEvent, id: string) {
-    if ($isAnimatingSolve || $isReplaying) return;
+    if ($isAnimatingSolve || $isReplaying || $showCelebration) return;
     event.preventDefault();
     const el = event.currentTarget as HTMLElement | SVGElement;
     try {
@@ -109,6 +110,29 @@
       } catch (err) {
         // Already released or failed
       }
+    }
+  }
+
+  function handleCelebrationClick() {
+    showCelebration.set(false);
+    
+    // If they solved using Auto-Solve (no moves recorded) or history is too short
+    if ($moves === 0 || $moveHistory.length < 2) {
+      handleReplayComplete();
+      return;
+    }
+
+    // Run the slow, cinematic replay, then advance
+    runSlowReplay(() => {
+      handleReplayComplete();
+    });
+  }
+
+  function handleReplayComplete() {
+    if ($currentLevelId < levels.length - 1) {
+      loadLevel($currentLevelId + 1); // Auto-progression to the next level
+    } else {
+      showVictoryScreen.set(true); // Final level completed, show the victory card
     }
   }
 
@@ -248,14 +272,14 @@
         class="level-select" 
         value={$currentLevelId} 
         onchange={(e) => loadLevel(parseInt((e.target as HTMLSelectElement).value))}
-        disabled={$isAnimatingSolve || $isReplaying}
+        disabled={$isAnimatingSolve || $isReplaying || $showCelebration}
       >
         {#each levels as lvl}
           <option value={lvl.id}>Level {lvl.id}: {lvl.name}</option>
         {/each}
       </select>
       
-      <button class="reset-btn" onclick={resetLevel} title="Reset level layout" disabled={$isAnimatingSolve || $isReplaying}>
+      <button class="reset-btn" onclick={resetLevel} title="Reset level layout" disabled={$isAnimatingSolve || $isReplaying || $showCelebration}>
         <RefreshCw size={16} />
       </button>
     </div>
@@ -315,8 +339,63 @@
         
         <div class="help-solution-footer">
           <p class="solution-text">Stuck on this level? Let the game calibrate the optimal vertex coordinates for you.</p>
-          <button class="solve-btn" onclick={() => { showHelp = false; solveCurrentLevel(); }} disabled={$isAnimatingSolve || $isReplaying}>
+          <button class="solve-btn" onclick={() => { showHelp = false; solveCurrentLevel(); }} disabled={$isAnimatingSolve || $isReplaying || $showCelebration}>
             <Wand2 size={13} style="margin-right: 6px; display: inline-block; vertical-align: middle;" /> Auto-Solve Puzzle
+          </button>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Celebration Modal Overlay -->
+    {#if $showCelebration}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="win-modal-backdrop" onclick={handleCelebrationClick}>
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="win-modal celebration-modal" onclick={(e) => e.stopPropagation()}>
+          <h2 class="win-title celebration-title">LEVEL CALIBRATED</h2>
+          <p class="win-subtitle">Stage {activeLevel.id} untangled successfully.</p>
+
+          <!-- Neon Line Visual Trick -->
+          <div class="neon-line-trick">
+            <svg viewBox="0 0 160 160" width="120" height="120">
+              <!-- Tangled Group (Pink) -->
+              <g class="tangled-lines">
+                <line x1="35" y1="35" x2="125" y2="125" class="neon-line pink" />
+                <line x1="125" y1="35" x2="35" y2="125" class="neon-line pink" />
+                <circle cx="35" cy="35" r="5.5" class="neon-node pink" />
+                <circle cx="125" cy="35" r="5.5" class="neon-node pink" />
+                <circle cx="35" cy="125" r="5.5" class="neon-node pink" />
+                <circle cx="125" cy="125" r="5.5" class="neon-node pink" />
+              </g>
+              <!-- Untangled Group (Cyan) -->
+              <g class="untangled-lines">
+                <line x1="35" y1="35" x2="35" y2="125" class="neon-line cyan" />
+                <line x1="125" y1="35" x2="125" y2="125" class="neon-line cyan" />
+                <circle cx="35" cy="35" r="5.5" class="neon-node cyan" />
+                <circle cx="125" cy="35" r="5.5" class="neon-node cyan" />
+                <circle cx="35" cy="125" r="5.5" class="neon-node cyan" />
+                <circle cx="125" cy="125" r="5.5" class="neon-node cyan" />
+              </g>
+              <!-- Shockwave Burst -->
+              <circle cx="80" cy="80" r="5" class="burst-circle" />
+            </svg>
+          </div>
+
+          <div class="win-stats-grid">
+            <div class="win-stat-item">
+              <span class="win-stat-label">Moves</span>
+              <span class="win-stat-val">{$moves}</span>
+            </div>
+            <div class="win-stat-item">
+              <span class="win-stat-label">Time</span>
+              <span class="win-stat-val">{formattedTime}</span>
+            </div>
+          </div>
+
+          <button class="modal-btn primary celebration-btn" onclick={handleCelebrationClick}>
+            Trace Path & Continue <ChevronRight size={16} style="margin-left: 4px;" />
           </button>
         </div>
       </div>
@@ -1147,5 +1226,142 @@
   @keyframes pulseGlow {
     0%, 100% { r: 18px; fill: rgba(255, 51, 102, 0.05); }
     50% { r: 25px; fill: rgba(255, 51, 102, 0.2); }
+  }
+
+  /* Celebration Popup Custom Styling */
+  .celebration-modal {
+    border-color: rgba(0, 229, 255, 0.35) !important;
+    box-shadow: 0 0 40px rgba(0, 229, 255, 0.15),
+                0 20px 50px rgba(0, 0, 0, 0.6) !important;
+    background: rgba(10, 15, 30, 0.95) !important;
+  }
+
+  .celebration-title {
+    color: #ffffff !important;
+    text-shadow: 0 0 15px rgba(0, 229, 255, 0.4) !important;
+  }
+
+  .celebration-btn {
+    animation: pulseCelebrationBtn 2s infinite ease-in-out;
+  }
+
+  @keyframes pulseCelebrationBtn {
+    0%, 100% {
+      box-shadow: 0 4px 12px rgba(0, 229, 255, 0.25);
+      transform: scale(1);
+    }
+    50% {
+      box-shadow: 0 6px 20px rgba(0, 229, 255, 0.5);
+      transform: scale(1.02);
+    }
+  }
+
+  /* Looping Neon Line Trick Animation */
+  .neon-line-trick {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    margin: 5px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .neon-line {
+    stroke-width: 4;
+    stroke-linecap: round;
+  }
+
+  .neon-line.pink {
+    stroke: #FF3366;
+    filter: drop-shadow(0 0 6px #FF3366);
+  }
+
+  .neon-line.cyan {
+    stroke: #00E5FF;
+    filter: drop-shadow(0 0 6px #00E5FF);
+  }
+
+  .neon-node {
+    fill: #060912;
+    stroke-width: 2.5;
+  }
+
+  .neon-node.pink {
+    stroke: #FF3366;
+    filter: drop-shadow(0 0 4px #FF3366);
+  }
+
+  .neon-node.cyan {
+    stroke: #00E5FF;
+    filter: drop-shadow(0 0 4px #00E5FF);
+  }
+
+  .tangled-lines {
+    transform-origin: 80px 80px;
+    animation: fadeOutTangled 4s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .untangled-lines {
+    transform-origin: 80px 80px;
+    animation: fadeInUntangled 4s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .burst-circle {
+    fill: none;
+    stroke: #00E5FF;
+    stroke-width: 2.5;
+    transform-origin: 80px 80px;
+    animation: circleBurst 4s infinite cubic-bezier(0.1, 0.8, 0.3, 1);
+  }
+
+  @keyframes fadeOutTangled {
+    0%, 35% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    45%, 90% {
+      opacity: 0;
+      transform: scale(0.8);
+    }
+    95%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes fadeInUntangled {
+    0%, 35% {
+      opacity: 0;
+      transform: scale(1.2);
+    }
+    45%, 90% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    95%, 100% {
+      opacity: 0;
+      transform: scale(1.2);
+    }
+  }
+
+  @keyframes circleBurst {
+    0%, 38% {
+      r: 4px;
+      opacity: 0;
+      stroke-width: 4;
+    }
+    40% {
+      opacity: 1;
+      stroke-width: 3.5;
+    }
+    55%, 90% {
+      r: 65px;
+      opacity: 0;
+      stroke-width: 0.5;
+    }
+    95%, 100% {
+      opacity: 0;
+    }
   }
 </style>

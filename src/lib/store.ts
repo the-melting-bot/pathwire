@@ -5,6 +5,7 @@ import type { Vertex, Edge, Level } from './types';
 export const currentLevelId = writable<number>(0); // Start at Level 0 Tutorial!
 export const gameWon = writable<boolean>(false);
 export const showVictoryScreen = writable<boolean>(false);
+export const showCelebration = writable<boolean>(false);
 export const isReplaying = writable<boolean>(false);
 export const moveHistory = writable<Vertex[][]>([]);
 export const moves = writable<number>(0);
@@ -488,4 +489,57 @@ export function runSolveReplay(onComplete: () => void) {
   }
 
   requestAnimationFrame(playNextFrame);
+}
+
+export function runSlowReplay(onComplete: () => void) {
+  if (get(isReplaying)) return;
+
+  const history = get(moveHistory);
+  if (history.length < 2) {
+    onComplete();
+    return;
+  }
+
+  stopTimer();
+  isReplaying.set(true);
+
+  const duration = 4500; // Cinematic 4.5 seconds
+  const startTime = performance.now();
+
+  function play(currentTime: number) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+
+    // Map progress linearly to index range in history
+    const virtualIdx = progress * (history.length - 1);
+    const baseIdx = Math.floor(virtualIdx);
+    const nextIdx = Math.min(baseIdx + 1, history.length - 1);
+    const ratio = virtualIdx - baseIdx;
+
+    const baseState = history[baseIdx];
+    const nextState = history[nextIdx];
+
+    const currentVertices = baseState.map(baseV => {
+      const nextV = nextState.find(v => v.id === baseV.id) || baseV;
+      return {
+        id: baseV.id,
+        x: baseV.x + (nextV.x - baseV.x) * ratio,
+        y: baseV.y + (nextV.y - baseV.y) * ratio
+      };
+    });
+
+    vertices.set(currentVertices);
+    checkIntersections(); // Updates visual feedback on lines!
+
+    if (progress < 1) {
+      requestAnimationFrame(play);
+    } else {
+      setTimeout(() => {
+        isReplaying.set(false);
+        onComplete();
+      }, 400); // Satisfying pause at the end
+    }
+  }
+
+  requestAnimationFrame(play);
 }
