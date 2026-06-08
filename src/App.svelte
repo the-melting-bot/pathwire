@@ -259,9 +259,10 @@
 
   let isMuted = $state(false);
   let lastSpokenText = "";
+  let lastSpokenVoice = $state<SpeechSynthesisVoice | null>(null);
 
-  // Cache loaded system voices
-  let systemVoices: SpeechSynthesisVoice[] = [];
+  // Cache loaded system voices reactively using Svelte 5 state
+  let systemVoices = $state<SpeechSynthesisVoice[]>([]);
   if (typeof window !== 'undefined' && window.speechSynthesis) {
     systemVoices = window.speechSynthesis.getVoices();
     window.speechSynthesis.onvoiceschanged = () => {
@@ -272,25 +273,76 @@
   function getBestEnglishVoice(): SpeechSynthesisVoice | null {
     if (systemVoices.length === 0) return null;
     
-    // Natural human sounding English voice keywords in order of preference
-    const preferredKeywords = [
-      "Google US English",
-      "Samantha",
-      "Siri",
-      "Daniel",
-      "Microsoft Zira",
-      "Microsoft David"
-    ];
+    // Clean, robust English filtering
+    const englishVoices = systemVoices.filter(v => {
+      const lang = v.lang.toLowerCase();
+      return lang.startsWith("en") || lang.includes("-en") || lang.includes("_en");
+    });
 
-    for (const keyword of preferredKeywords) {
-      const found = systemVoices.find(v => 
-        v.lang.startsWith("en") && 
-        v.name.toLowerCase().includes(keyword.toLowerCase())
-      );
-      if (found) return found;
-    }
+    if (englishVoices.length === 0) return null;
 
-    return systemVoices.find(v => v.lang.startsWith("en")) || null;
+    // Score English voices to find the most natural female voice
+    const scoredVoices = englishVoices.map(v => {
+      const name = v.name.toLowerCase();
+      let score = 0;
+
+      // Reject/penalize legacy robotic/novelty voices
+      const roboticKeywords = [
+        "agnes", "kathy", "princess", "vicki", "fred", "albert", "ralph", 
+        "junior", "whisper", "zarvox", "deranged", "hysterical", "cellos", 
+        "bad news", "good news", "bells", "boing", "bubbles", "pipe organ", 
+        "trinoids", "brush"
+      ];
+      if (roboticKeywords.some(keyword => name.includes(keyword))) {
+        score -= 1000;
+      }
+
+      // Prioritize high-quality/premium/enhanced indicators
+      if (name.includes("enhanced") || name.includes("premium")) {
+        score += 100;
+      }
+
+      // Detect natural female names or female voice indicators
+      const femaleKeywords = [
+        "samantha", "siri voice 2", "siri voice 4", "victoria", "susan", 
+        "karen", "moira", "tessa", "veena", "fiona", "serena", "kate", 
+        "zira", "hazel", "stephanie", "zoe", "sonia", "jenny", "aria",
+        "google us english", "google uk english female", "google au english female",
+        "google in english female", "female"
+      ];
+      
+      // Siri generic (could be voice 1/3 which are male, but Siri is still very natural)
+      if (name.includes("siri")) {
+        if (name.includes("voice 1") || name.includes("voice 3") || name.includes("male")) {
+          score += 30; // Natural but male
+        } else {
+          score += 80; // Natural female Siri voice
+        }
+      }
+
+      if (femaleKeywords.some(keyword => name.includes(keyword))) {
+        score += 50;
+      }
+
+      // Google voices in Chrome are generally very natural
+      if (name.includes("google")) {
+        score += 20;
+      }
+
+      // General English voices that aren't robotic, but maybe male or not specified
+      // e.g., Daniel, Alex, David, Guy, etc.
+      const maleKeywords = ["daniel", "david", "alex", "bruce", "guy", "male", "siri voice 1", "siri voice 3"];
+      if (maleKeywords.some(keyword => name.includes(keyword))) {
+        score -= 10; // Slight penalty to prefer female voices
+      }
+
+      return { voice: v, score };
+    });
+
+    // Sort descending by score
+    scoredVoices.sort((a, b) => b.score - a.score);
+
+    return scoredVoices[0].voice;
   }
 
   function speakSubtitle(text: string) {
@@ -300,16 +352,20 @@
     if (isMuted || !showVideoDemo || !videoPlaying) {
       window.speechSynthesis.cancel();
       lastSpokenText = "";
+      lastSpokenVoice = null;
       voiceSpeaking = false;
       return;
     }
 
-    // If it's already speaking this exact text, do nothing
-    if (text === lastSpokenText) return;
+    const bestVoice = getBestEnglishVoice();
+
+    // If it's already speaking this exact text with the exact same voice, do nothing
+    if (text === lastSpokenText && bestVoice === lastSpokenVoice) return;
     
     // Cancel the previous voice and speak the new text
     window.speechSynthesis.cancel();
     lastSpokenText = text;
+    lastSpokenVoice = bestVoice;
     voiceSpeaking = true;
     
     const utterance = new SpeechSynthesisUtterance(text);
@@ -317,13 +373,13 @@
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
 
-    const bestVoice = getBestEnglishVoice();
     if (bestVoice) {
       utterance.voice = bestVoice;
     }
     
     utterance.onerror = () => {
       lastSpokenText = "";
+      lastSpokenVoice = null;
       voiceSpeaking = false;
     };
     utterance.onend = () => {
@@ -345,6 +401,7 @@
         window.speechSynthesis.cancel();
       }
       lastSpokenText = "";
+      lastSpokenVoice = null;
     }
   });
 
