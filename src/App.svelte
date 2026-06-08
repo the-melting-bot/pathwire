@@ -245,6 +245,56 @@
     videoTime = parseFloat(target.value);
   }
 
+  let isMuted = $state(false);
+  let lastSpokenText = "";
+
+  function speakSubtitle(text: string) {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    
+    // If muted or video guide is closed or paused, cancel any active voice and return
+    if (isMuted || !showVideoDemo || !videoPlaying) {
+      window.speechSynthesis.cancel();
+      lastSpokenText = "";
+      return;
+    }
+
+    // If it's already speaking this exact text, do nothing
+    if (text === lastSpokenText) return;
+    
+    // Cancel the previous voice and speak the new text
+    window.speechSynthesis.cancel();
+    lastSpokenText = text;
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.95; // Slightly slower for crisp clear reading
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    
+    utterance.onerror = () => {
+      lastSpokenText = "";
+    };
+    utterance.onend = () => {
+      // Done
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  // Derive the caption reactively
+  let simCaption = $derived(getSimulatedCaption(videoTime));
+
+  // Reactive effect to trigger narration when subtitles change or state shifts
+  $effect(() => {
+    if (showVideoDemo && videoPlaying && !isMuted) {
+      speakSubtitle(simCaption);
+    } else {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      lastSpokenText = "";
+    }
+  });
+
   // Watch victory state to show the celebration popup
   $effect(() => {
     if ($gameWon && !$showVictoryScreen && !$isAnimatingSolve && !$isReplaying && !$showCelebration) {
@@ -559,7 +609,6 @@
       {@const simVertices = getSimulatedVertices(videoTime)}
       {@const simCursor = getSimulatedCursor(videoTime)}
       {@const simPopup = getSimulatedPopup(videoTime)}
-      {@const simCaption = getSimulatedCaption(videoTime)}
       {@const simEdges = getSimulatedEdges(videoTime, simVertices)}
 
       <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -721,11 +770,20 @@
               <div class="video-progress-fill" style="width: {(videoTime / 15) * 100}%"></div>
             </div>
 
-            <button class="video-control-icon-btn" title="Mute">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              </svg>
+            <button class="video-control-icon-btn" onclick={() => isMuted = !isMuted} title={isMuted ? "Unmute" : "Mute"}>
+              {#if isMuted}
+                <!-- Muted Icon -->
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#FF3366" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 2px rgba(255, 51, 102, 0.4));">
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                  <path d="M9 9v6a3 3 0 0 0 3 3h1.586l4.707 4.707A1 1 0 0 0 20 22V4a1 1 0 0 0-1.707-.707L13.586 8H12a3 3 0 0 0-3 1z"></path>
+                </svg>
+              {:else}
+                <!-- Unmuted Icon -->
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+              {/if}
             </button>
 
             <button class="video-control-icon-btn" title="Fullscreen">
