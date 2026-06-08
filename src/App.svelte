@@ -260,6 +260,7 @@
   let isMuted = $state(false);
   let lastSpokenText = "";
   let lastSpokenVoice = $state<SpeechSynthesisVoice | null>(null);
+  let selectedVoiceURI = $state<string>("");
 
   // Cache loaded system voices reactively using Svelte 5 state
   let systemVoices = $state<SpeechSynthesisVoice[]>([]);
@@ -270,80 +271,98 @@
     };
   }
 
+  function getVoiceScore(v: SpeechSynthesisVoice): number {
+    const name = v.name.toLowerCase();
+    let score = 0;
+
+    // Reject/penalize legacy robotic/novelty voices
+    const roboticKeywords = [
+      "agnes", "kathy", "princess", "vicki", "fred", "albert", "ralph", 
+      "junior", "whisper", "zarvox", "deranged", "hysterical", "cellos", 
+      "bad news", "good news", "bells", "boing", "bubbles", "pipe organ", 
+      "trinoids", "brush"
+    ];
+    if (roboticKeywords.some(keyword => name.includes(keyword))) {
+      score -= 1000;
+    }
+
+    // Prioritize high-quality/premium/enhanced/natural/online indicators
+    if (name.includes("enhanced") || name.includes("premium") || name.includes("natural") || name.includes("online")) {
+      score += 200;
+    }
+
+    // Detect natural female names or female voice indicators
+    const femaleKeywords = [
+      "samantha", "siri voice 2", "siri voice 4", "victoria", "susan", 
+      "karen", "moira", "tessa", "veena", "fiona", "serena", "kate", 
+      "zira", "hazel", "stephanie", "zoe", "sonia", "jenny", "aria",
+      "google us english", "google uk english female", "google au english female",
+      "google in english female", "female"
+    ];
+    
+    // Siri generic (could be voice 1/3 which are male, but Siri is still very natural)
+    if (name.includes("siri")) {
+      if (name.includes("voice 1") || name.includes("voice 3") || name.includes("male")) {
+        score += 30; // Natural but male
+      } else {
+        score += 80; // Natural female Siri voice
+      }
+    }
+
+    if (femaleKeywords.some(keyword => name.includes(keyword))) {
+      score += 50;
+    }
+
+    // Google voices in Chrome are generally very natural
+    if (name.includes("google")) {
+      score += 20;
+    }
+
+    // General English voices that aren't robotic, but maybe male or not specified
+    const maleKeywords = ["daniel", "david", "alex", "bruce", "guy", "male", "siri voice 1", "siri voice 3"];
+    if (maleKeywords.some(keyword => name.includes(keyword))) {
+      score -= 10; // Slight penalty to prefer female voices
+    }
+
+    return score;
+  }
+
+  // Derived list of English voices sorted by our scoring system
+  let englishVoicesList = $derived(
+    systemVoices
+      .filter(v => {
+        const lang = v.lang.toLowerCase();
+        return lang.startsWith("en") || lang.includes("-en") || lang.includes("_en");
+      })
+      .sort((a, b) => getVoiceScore(b) - getVoiceScore(a))
+  );
+
   function getBestEnglishVoice(): SpeechSynthesisVoice | null {
     if (systemVoices.length === 0) return null;
-    
-    // Clean, robust English filtering
-    const englishVoices = systemVoices.filter(v => {
-      const lang = v.lang.toLowerCase();
-      return lang.startsWith("en") || lang.includes("-en") || lang.includes("_en");
-    });
 
-    if (englishVoices.length === 0) return null;
+    // 1. If user has chosen a specific voice, use that
+    if (selectedVoiceURI) {
+      const matched = systemVoices.find(v => v.voiceURI === selectedVoiceURI);
+      if (matched) return matched;
+    }
 
-    // Score English voices to find the most natural female voice
-    const scoredVoices = englishVoices.map(v => {
-      const name = v.name.toLowerCase();
-      let score = 0;
+    // 2. Otherwise use the highest scored English voice from our list
+    if (englishVoicesList.length > 0) {
+      return englishVoicesList[0];
+    }
 
-      // Reject/penalize legacy robotic/novelty voices
-      const roboticKeywords = [
-        "agnes", "kathy", "princess", "vicki", "fred", "albert", "ralph", 
-        "junior", "whisper", "zarvox", "deranged", "hysterical", "cellos", 
-        "bad news", "good news", "bells", "boing", "bubbles", "pipe organ", 
-        "trinoids", "brush"
-      ];
-      if (roboticKeywords.some(keyword => name.includes(keyword))) {
-        score -= 1000;
-      }
-
-      // Prioritize high-quality/premium/enhanced indicators
-      if (name.includes("enhanced") || name.includes("premium")) {
-        score += 100;
-      }
-
-      // Detect natural female names or female voice indicators
-      const femaleKeywords = [
-        "samantha", "siri voice 2", "siri voice 4", "victoria", "susan", 
-        "karen", "moira", "tessa", "veena", "fiona", "serena", "kate", 
-        "zira", "hazel", "stephanie", "zoe", "sonia", "jenny", "aria",
-        "google us english", "google uk english female", "google au english female",
-        "google in english female", "female"
-      ];
-      
-      // Siri generic (could be voice 1/3 which are male, but Siri is still very natural)
-      if (name.includes("siri")) {
-        if (name.includes("voice 1") || name.includes("voice 3") || name.includes("male")) {
-          score += 30; // Natural but male
-        } else {
-          score += 80; // Natural female Siri voice
-        }
-      }
-
-      if (femaleKeywords.some(keyword => name.includes(keyword))) {
-        score += 50;
-      }
-
-      // Google voices in Chrome are generally very natural
-      if (name.includes("google")) {
-        score += 20;
-      }
-
-      // General English voices that aren't robotic, but maybe male or not specified
-      // e.g., Daniel, Alex, David, Guy, etc.
-      const maleKeywords = ["daniel", "david", "alex", "bruce", "guy", "male", "siri voice 1", "siri voice 3"];
-      if (maleKeywords.some(keyword => name.includes(keyword))) {
-        score -= 10; // Slight penalty to prefer female voices
-      }
-
-      return { voice: v, score };
-    });
-
-    // Sort descending by score
-    scoredVoices.sort((a, b) => b.score - a.score);
-
-    return scoredVoices[0].voice;
+    return null;
   }
+
+  // Update selectedVoiceURI once voices are loaded if it hasn't been set by the user
+  $effect(() => {
+    if (systemVoices.length > 0 && selectedVoiceURI === "") {
+      const best = getBestEnglishVoice();
+      if (best) {
+        selectedVoiceURI = best.voiceURI;
+      }
+    }
+  });
 
   function speakSubtitle(text: string) {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
@@ -369,7 +388,7 @@
     voiceSpeaking = true;
     
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.88; // Relaxed reading speed so the user can easily absorb instructions
+    utterance.rate = 0.92; // Tuned reading speed for natural articulation
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
 
@@ -735,9 +754,20 @@
               </svg>
               Demo Playback
             </div>
-            <button class="close-video-btn" onclick={() => showVideoDemo = false}>
-              <X size={18} />
-            </button>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              {#if englishVoicesList.length > 0}
+                <select class="video-voice-select" bind:value={selectedVoiceURI} title="Select Guide Voice">
+                  {#each englishVoicesList as voice}
+                    <option value={voice.voiceURI}>
+                      🗣️ {voice.name.replace(/(Microsoft|Google|Apple|Natural|Desktop|Mobile)\s*/gi, '')}
+                    </option>
+                  {/each}
+                </select>
+              {/if}
+              <button class="close-video-btn" onclick={() => showVideoDemo = false}>
+                <X size={18} />
+              </button>
+            </div>
           </div>
 
           <!-- Simulated Video Board Frame -->
@@ -2165,6 +2195,40 @@
 
   .video-control-icon-btn:hover {
     background: rgba(255, 255, 255, 0.05);
+    color: #ffffff;
+  }
+
+  /* Sleek Voice Selector Dropdown */
+  .video-voice-select {
+    background: rgba(3, 7, 18, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 10px;
+    font-family: inherit;
+    border-radius: 6px;
+    padding: 3px 20px 3px 6px;
+    outline: none;
+    max-width: 130px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='rgba(0, 229, 255, 0.8)' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5' /%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    background-size: 8px;
+  }
+
+  .video-voice-select:hover {
+    border-color: rgba(0, 229, 255, 0.3);
+    background-color: rgba(3, 7, 18, 0.85);
+    color: #ffffff;
+  }
+
+  .video-voice-select option {
+    background: #060912;
     color: #ffffff;
   }
 </style>
