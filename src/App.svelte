@@ -20,7 +20,9 @@
     recordSnapshot,
     runSolveReplay,
     runSlowReplay,
-    moveHistory
+    moveHistory,
+    startTimer,
+    stopTimer
   } from './lib/store';
   import { 
     RefreshCw, 
@@ -38,6 +40,11 @@
   import InteractiveBackground from './lib/components/InteractiveBackground.svelte';
 
   let showHelp = $state(false);
+  let showVideoDemo = $state(false);
+  let videoPlaying = $state(true);
+  let videoTime = $state(0);
+  let lastTimestamp = 0;
+  let videoAnimationId: number | null = null;
   let svgElement: SVGSVGElement | null = $state(null);
   let draggingVertexId: string | null = $state(null);
 
@@ -45,6 +52,198 @@
   onMount(() => {
     loadLevel(0); // Load tutorial level by default
   });
+
+  function runVideoLoop(timestamp: number) {
+    if (!showVideoDemo) return;
+    if (lastTimestamp === 0) lastTimestamp = timestamp;
+    const elapsed = timestamp - lastTimestamp;
+    lastTimestamp = timestamp;
+
+    if (videoPlaying) {
+      videoTime += elapsed / 1000;
+      if (videoTime >= 15) {
+        videoTime = 0; // Loop back
+      }
+    }
+    videoAnimationId = requestAnimationFrame(runVideoLoop);
+  }
+
+  // Effect to manage the requestAnimationFrame loop for video time ticking
+  $effect(() => {
+    if (showVideoDemo) {
+      // Pause main game timer while watching video
+      stopTimer();
+      // Start video loop
+      lastTimestamp = 0;
+      videoTime = 0;
+      videoPlaying = true;
+      videoAnimationId = requestAnimationFrame(runVideoLoop);
+    } else {
+      // Cancel video loop
+      if (videoAnimationId) {
+        cancelAnimationFrame(videoAnimationId);
+        videoAnimationId = null;
+      }
+      // Resume main game timer if game is active
+      if (!$gameWon && $moves > 0 && !$isAnimatingSolve && !$isReplaying) {
+        startTimer();
+      }
+    }
+
+    return () => {
+      if (videoAnimationId) {
+        cancelAnimationFrame(videoAnimationId);
+      }
+    };
+  });
+
+  // Helper to format video time as 0:SS
+  function formatVideoTime(seconds: number): string {
+    const s = Math.floor(seconds);
+    return `0:${s.toString().padStart(2, '0')}`;
+  }
+
+  // Get coordinates for simulated vertices based on videoTime
+  function getSimulatedVertices(t: number) {
+    let v1 = { id: "v1", x: 100, y: 200 };
+    let v2 = { id: "v2", x: 220, y: 200 };
+    let v3 = { id: "v3", x: 160, y: 300 };
+    let v4 = { id: "v4", x: 160, y: 120 };
+
+    if (t >= 2.0 && t < 6.0) {
+      const r = (t - 2.0) / 4.0;
+      v4.x = 160 + 140 * r;
+    } else if (t >= 6.0 && t < 10.0) {
+      v4.x = 300;
+    } else if (t >= 10.0 && t < 12.0) {
+      // Replay phase
+      const r = (t - 10.0) / 2.0;
+      v4.x = 160 + 140 * r;
+    } else if (t >= 12.0) {
+      // Transition to Level 1
+      v1 = { id: "v1", x: 100, y: 100 };
+      v2 = { id: "v2", x: 300, y: 100 };
+      v3 = { id: "v3", x: 100, y: 300 };
+      v4 = { id: "v4", x: 300, y: 300 };
+    }
+
+    return [v1, v2, v3, v4];
+  }
+
+  // Get simulated cursor position
+  function getSimulatedCursor(t: number) {
+    let x = 200;
+    let y = 350;
+    let visible = true;
+    let scale = 1.2;
+
+    if (t >= 0.0 && t < 1.0) {
+      // Enter cursor
+      const r = t / 1.0;
+      x = 200 + (160 - 200) * r;
+      y = 350 + (120 - 350) * r;
+    } else if (t >= 1.0 && t < 2.0) {
+      // Hover/click v4
+      x = 160;
+      y = 120;
+      if (t >= 1.7 && t < 2.0) scale = 0.95; // clicking pulse
+    } else if (t >= 2.0 && t < 6.0) {
+      // Dragging node
+      const r = (t - 2.0) / 4.0;
+      x = 160 + 140 * r;
+      y = 120;
+      scale = 0.95; // hold down click
+    } else if (t >= 6.0 && t < 7.0) {
+      // Move to button
+      const r = t - 6.0;
+      x = 300 + (200 - 300) * r;
+      y = 120 + (262 - 120) * r; // target button center
+    } else if (t >= 7.0 && t < 8.0) {
+      // Hover/click button
+      x = 200;
+      y = 262;
+      if (t >= 7.6 && t < 7.9) scale = 0.95; // click button
+    } else if (t >= 8.0 && t < 9.0) {
+      // Retreat
+      const r = t - 8.0;
+      x = 200;
+      y = 262 + (150 - 262) * r;
+      visible = false;
+    } else {
+      visible = false;
+    }
+
+    return { x, y, visible, scale };
+  }
+
+  // Get simulated edges
+  function getSimulatedEdges(t: number, verticesList: Array<{id: string, x: number, y: number}>) {
+    const vMap = new Map(verticesList.map(v => [v.id, v]));
+    
+    if (t < 12.0) {
+      // Level 0 connections
+      const v4_x = vMap.get("v4")?.x || 160;
+      const isIntersecting = v4_x < 235; // mathematically crosses until v4 moves far right
+      return [
+        { id: "e1", from: "v1", to: "v2", isIntersecting },
+        { id: "e2", from: "v3", to: "v4", isIntersecting },
+        { id: "e3", from: "v1", to: "v3", isIntersecting: false },
+        { id: "e4", from: "v2", to: "v3", isIntersecting: false }
+      ];
+    } else {
+      // Level 1 connections (always crossed initially)
+      return [
+        { id: "e1", from: "v1", to: "v4", isIntersecting: true },
+        { id: "e2", from: "v2", to: "v3", isIntersecting: true },
+        { id: "e3", from: "v1", to: "v2", isIntersecting: false },
+        { id: "e4", from: "v3", to: "v4", isIntersecting: false },
+        { id: "e5", from: "v1", to: "v3", isIntersecting: false },
+        { id: "e6", from: "v2", to: "v4", isIntersecting: false }
+      ];
+    }
+  }
+
+  // Get simulated popup details
+  function getSimulatedPopup(t: number) {
+    let visible = false;
+    let opacity = 0;
+    let btnActive = false;
+
+    if (t >= 6.0 && t < 8.0) {
+      visible = true;
+      if (t < 6.4) {
+        opacity = (t - 6.0) / 0.4; // fade in
+      } else {
+        opacity = 1;
+      }
+
+      if (t >= 7.6 && t < 7.9) {
+        btnActive = true; // button click state
+      }
+    }
+
+    return { visible, opacity, btnActive };
+  }
+
+  // Get simulated caption/subtitle text
+  function getSimulatedCaption(t: number): string {
+    if (t >= 0.0 && t < 2.0) {
+      return "Welcome to Linetrick! Drag crossing nodes to untangle wires.";
+    } else if (t >= 2.0 && t < 6.0) {
+      return "Crossing lines glow pink. Clean, untangled paths glow neon cyan.";
+    } else if (t >= 6.0 && t < 8.0) {
+      return "Untangle all wires to calibrate the system and trigger completion.";
+    } else if (t >= 8.0 && t < 12.0) {
+      return "Click 'Trace Path' to replay your solution path in slow motion.";
+    } else {
+      return "Once the replay finishes, you automatically advance to the next level!";
+    }
+  }
+
+  function handleScrubberInput(e: Event) {
+    const target = e.target as HTMLInputElement;
+    videoTime = parseFloat(target.value);
+  }
 
   // Watch victory state to show the celebration popup
   $effect(() => {
@@ -160,9 +359,18 @@
         <Gamepad2 size={22} style="color: #00E5FF; filter: drop-shadow(0 0 4px #00E5FF);" />
         <h1 class="logo-text">LINE<span>TRICK</span></h1>
       </div>
-      <button class="help-btn" onclick={() => showHelp = !showHelp} class:active={showHelp} title="How to play">
-        <HelpCircle size={18} />
-      </button>
+      <div class="header-controls">
+        <button class="video-guide-btn" onclick={() => showVideoDemo = true} title="Watch video guide">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle;">
+            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+          </svg>
+          Demo
+        </button>
+        <button class="help-btn" onclick={() => showHelp = !showHelp} class:active={showHelp} title="How to play">
+          <HelpCircle size={18} />
+        </button>
+      </div>
     </header>
 
     <!-- Stats Panel -->
@@ -342,6 +550,190 @@
           <button class="solve-btn" onclick={() => { showHelp = false; solveCurrentLevel(); }} disabled={$isAnimatingSolve || $isReplaying || $showCelebration}>
             <Wand2 size={13} style="margin-right: 6px; display: inline-block; vertical-align: middle;" /> Auto-Solve Puzzle
           </button>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Video Demo Modal Overlay -->
+    {#if showVideoDemo}
+      {@const simVertices = getSimulatedVertices(videoTime)}
+      {@const simCursor = getSimulatedCursor(videoTime)}
+      {@const simPopup = getSimulatedPopup(videoTime)}
+      {@const simCaption = getSimulatedCaption(videoTime)}
+      {@const simEdges = getSimulatedEdges(videoTime, simVertices)}
+
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="win-modal-backdrop" onclick={() => showVideoDemo = false}>
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="video-modal-card glass" onclick={(e) => e.stopPropagation()}>
+          <div class="video-modal-header">
+            <div class="video-modal-title">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#00E5FF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; display: inline-block; vertical-align: middle;">
+                <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+              </svg>
+              Demo Playback
+            </div>
+            <button class="close-video-btn" onclick={() => showVideoDemo = false}>
+              <X size={18} />
+            </button>
+          </div>
+
+          <!-- Simulated Video Board Frame -->
+          <div class="simulated-video-frame">
+
+            <svg viewBox="0 0 400 400" class="video-svg-canvas">
+              <defs>
+                <filter id="video-glow-pink" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur1" />
+                  <feMerge>
+                    <feMergeNode in="blur1" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+                <filter id="video-glow-cyan" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur1" />
+                  <feMerge>
+                    <feMergeNode in="blur1" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+
+              <!-- Grid pattern lines inside the video -->
+              <rect width="400" height="400" fill="#060912" rx="16" />
+              <path d="M 0,50 L 400,50 M 0,100 L 400,100 M 0,150 L 400,150 M 0,200 L 400,200 M 0,250 L 400,250 M 0,300 L 400,300 M 0,350 L 400,350
+                       M 50,0 L 50,400 M 100,0 L 100,400 M 150,0 L 150,400 M 200,0 L 200,400 M 250,0 L 250,400 M 300,0 L 300,400 M 350,0 L 350,400"
+                    stroke="rgba(0, 229, 255, 0.03)" stroke-width="1" />
+
+              <!-- Tutorial target indicator -->
+              {#if videoTime < 6.0}
+                <g class="tutorial-target-group">
+                  <circle cx="300" cy="120" r="20" fill="rgba(0, 229, 255, 0.03)" stroke="#00E5FF" stroke-width="1.5" stroke-dasharray="3, 3" />
+                  <circle cx="300" cy="120" r="6" fill="none" stroke="#00E5FF" stroke-width="1.5" opacity="0.6" />
+                  <line x1="160" y1="120" x2="300" y2="120" stroke="rgba(0, 229, 255, 0.2)" stroke-width="2" stroke-dasharray="5, 5" />
+                </g>
+              {/if}
+
+              <!-- Wires / Edges -->
+              {#each simEdges as edge}
+                {@const fromV = simVertices.find(v => v.id === edge.from)}
+                {@const toV = simVertices.find(v => v.id === edge.to)}
+                {#if fromV && toV}
+                  <line
+                    x1={fromV.x}
+                    y1={fromV.y}
+                    x2={toV.x}
+                    y2={toV.y}
+                    stroke={edge.isIntersecting ? '#FF3366' : '#00E5FF'}
+                    stroke-width="3.5"
+                    stroke-linecap="round"
+                    filter={edge.isIntersecting ? 'url(#video-glow-pink)' : 'url(#video-glow-cyan)'}
+                    opacity={simVertices[0].id === 'v1' && videoTime >= 12.0 && videoTime < 13.0 ? 1 - (videoTime - 12.0) : (videoTime >= 13.0 && videoTime < 14.0 ? (videoTime - 13.0) : 1)}
+                  />
+                {/if}
+              {/each}
+
+              <!-- Vertices -->
+              {#each simVertices as vertex}
+                <g 
+                  transform="translate({vertex.x}, {vertex.y})"
+                  opacity={simVertices[0].id === 'v1' && videoTime >= 12.0 && videoTime < 13.0 ? 1 - (videoTime - 12.0) : (videoTime >= 13.0 && videoTime < 14.0 ? (videoTime - 13.0) : 1)}
+                >
+                  <circle cx="0" cy="0" r="14" fill="rgba(0, 229, 255, 0.05)" />
+                  <circle cx="0" cy="0" r="6.5" fill="#060912" stroke={vertex.id === 'v4' && videoTime < 6.0 && (Math.floor(videoTime * 2.5) % 2 === 0) ? '#FF3366' : '#00E5FF'} stroke-width="2.2" />
+                </g>
+              {/each}
+
+              <!-- Simulated Calibration Popup -->
+              {#if simPopup.visible}
+                <g transform="translate(60, 100)" opacity={simPopup.opacity}>
+                  <rect width="280" height="200" rx="16" fill="rgba(15, 23, 42, 0.94)" stroke="rgba(0, 229, 255, 0.25)" stroke-width="1" />
+                  
+                  <text x="140" y="40" text-anchor="middle" fill="#ffffff" font-family="var(--font-display)" font-size="14" font-weight="900" letter-spacing="0.06em">LEVEL CALIBRATED</text>
+                  <text x="140" y="60" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="9">Stage 0 untangled successfully.</text>
+                  
+                  <!-- Fake Stats -->
+                  <rect x="30" y="85" width="100" height="40" rx="8" fill="rgba(255, 255, 255, 0.02)" stroke="rgba(255, 255, 255, 0.04)" stroke-width="1" />
+                  <text x="80" y="98" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="8" font-weight="700">MOVES</text>
+                  <text x="80" y="116" text-anchor="middle" fill="#ffffff" font-family="var(--font-mono)" font-size="12" font-weight="700">1</text>
+
+                  <rect x="150" y="85" width="100" height="40" rx="8" fill="rgba(255, 255, 255, 0.02)" stroke="rgba(255, 255, 255, 0.04)" stroke-width="1" />
+                  <text x="200" y="98" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="8" font-weight="700">TIME</text>
+                  <text x="200" y="116" text-anchor="middle" fill="#ffffff" font-family="var(--font-mono)" font-size="12" font-weight="700">00:04</text>
+
+                  <!-- Trace Button -->
+                  <rect x="30" y="145" width="220" height="34" rx="8" fill="#00E5FF" fill-opacity={simPopup.btnActive ? 0.95 : 0.8} stroke="rgba(0, 229, 255, 0.3)" stroke-width="1" />
+                  <text x="140" y="166" text-anchor="middle" fill="#030712" font-family="var(--font-display)" font-size="10" font-weight="900">TRACE PATH & CONTINUE</text>
+                </g>
+              {/if}
+
+              <!-- Simulated Cursor (hand icon) -->
+              {#if simCursor.visible}
+                <g transform="translate({simCursor.x}, {simCursor.y}) scale({simCursor.scale})" style="pointer-events: none; transition: transform 0.05s ease;">
+                  <path d="M0 0 L-2 -2 L-2 -12 L1 -9 L4 -14 L6 -13 L3 -8 L7 -8 Z" fill="none" />
+                  <g transform="translate(-2, -2)">
+                    <path d="M0 16.3V0L11.5 11.5H4.8L0 16.3Z" fill="#030712" stroke="#FF3366" stroke-width="1.8" stroke-linejoin="round" filter="drop-shadow(0 0 4px #FF3366)" />
+                  </g>
+                </g>
+              {/if}
+            </svg>
+
+            <!-- Subtitles captions inside the video -->
+            <div class="video-subtitles">
+              <p>{simCaption}</p>
+            </div>
+          </div>
+
+          <!-- Video Controls -->
+          <div class="video-controls-bar">
+            <button class="video-play-pause-btn" onclick={() => videoPlaying = !videoPlaying} title={videoPlaying ? 'Pause' : 'Play'}>
+              {#if videoPlaying}
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                  <rect x="4" y="4" width="4" height="16" rx="1"></rect>
+                  <rect x="16" y="4" width="4" height="16" rx="1"></rect>
+                </svg>
+              {:else}
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+              {/if}
+            </button>
+
+            <span class="video-time-display">
+              {formatVideoTime(videoTime)} / 0:15
+            </span>
+
+            <div class="video-scrubber-container">
+              <input
+                type="range"
+                min="0"
+                max="15"
+                step="0.05"
+                value={videoTime}
+                oninput={handleScrubberInput}
+                onmousedown={() => videoPlaying = false}
+                ontouchstart={() => videoPlaying = false}
+                class="video-scrubber"
+              />
+              <div class="video-progress-fill" style="width: {(videoTime / 15) * 100}%"></div>
+            </div>
+
+            <button class="video-control-icon-btn" title="Mute">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              </svg>
+            </button>
+
+            <button class="video-control-icon-btn" title="Fullscreen">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     {/if}
@@ -1364,4 +1756,248 @@
       opacity: 0;
     }
   }
+
+  /* Video Guide Header Button */
+  .video-guide-btn {
+    background: linear-gradient(135deg, rgba(0, 229, 255, 0.12) 0%, rgba(0, 88, 255, 0.12) 100%);
+    border: 1px solid rgba(0, 229, 255, 0.25);
+    border-radius: 9999px;
+    color: #ffffff;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 11px;
+    padding: 6px 14px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.05);
+  }
+
+  .video-guide-btn:hover {
+    background: linear-gradient(135deg, rgba(0, 229, 255, 0.22) 0%, rgba(0, 88, 255, 0.22) 100%);
+    border-color: rgba(0, 229, 255, 0.45);
+    box-shadow: 0 0 20px rgba(0, 229, 255, 0.15);
+    transform: translateY(-0.5px);
+  }
+
+  .video-guide-btn svg {
+    color: #00E5FF;
+    filter: drop-shadow(0 0 2px rgba(0, 229, 255, 0.4));
+  }
+
+  /* Video Modal Card */
+  .video-modal-card {
+    background: rgba(10, 15, 30, 0.95) !important;
+    border: 1px solid rgba(0, 229, 255, 0.2) !important;
+    border-radius: 28px;
+    padding: 24px 20px 20px 20px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6),
+                0 0 60px rgba(0, 229, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    animation: scaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .video-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    padding-bottom: 10px;
+  }
+
+  .video-modal-title {
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+  }
+
+  .close-video-btn {
+    background: transparent;
+    border: none;
+    color: hsl(var(--text-muted));
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 50%;
+    transition: all 0.2s;
+  }
+
+  .close-video-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #ffffff;
+  }
+
+  /* Simulated Video Frame */
+  .simulated-video-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    overflow: hidden;
+    background: #060912;
+    box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
+  }
+
+  .video-svg-canvas {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  /* Captions/Subtitles overlay */
+  .video-subtitles {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, rgba(3, 7, 18, 0.95) 75%, transparent 100%);
+    padding: 12px 16px 14px 16px;
+    text-align: center;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.02);
+  }
+
+  .video-subtitles p {
+    font-size: 11px;
+    font-weight: 600;
+    color: #ffffff;
+    line-height: 1.4;
+    margin: 0;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  }
+
+  /* Video Control Bar */
+  .video-controls-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 12px;
+    padding: 8px 12px;
+  }
+
+  .video-play-pause-btn {
+    background: transparent;
+    border: none;
+    color: #00E5FF;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+
+  .video-play-pause-btn:hover {
+    background: rgba(0, 229, 255, 0.08);
+    color: #ffffff;
+  }
+
+  .video-time-display {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: hsl(var(--text-muted));
+    min-width: 60px;
+  }
+
+  /* Timeline Scrubber Slider */
+  .video-scrubber-container {
+    flex-grow: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .video-scrubber {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    outline: none;
+    cursor: pointer;
+    position: relative;
+    z-index: 10;
+  }
+
+  .video-scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #00E5FF;
+    border: 1.5px solid #ffffff;
+    box-shadow: 0 0 6px rgba(0, 229, 255, 0.8);
+    transition: transform 0.1s ease;
+  }
+
+  .video-scrubber::-webkit-slider-thumb:hover {
+    transform: scale(1.3);
+  }
+
+  .video-scrubber::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #00E5FF;
+    border: 1.5px solid #ffffff;
+    box-shadow: 0 0 6px rgba(0, 229, 255, 0.8);
+    transition: transform 0.1s ease;
+  }
+
+  .video-scrubber::-moz-range-thumb:hover {
+    transform: scale(1.3);
+  }
+
+  .video-progress-fill {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 4px;
+    border-radius: 2px;
+    background: #00E5FF;
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  /* Video control icon buttons */
+  .video-control-icon-btn {
+    background: transparent;
+    border: none;
+    color: hsl(var(--text-muted));
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+
+  .video-control-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #ffffff;
+  }
 </style>
+
