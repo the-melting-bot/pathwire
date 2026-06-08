@@ -43,6 +43,7 @@
   let showVideoDemo = $state(false);
   let videoPlaying = $state(true);
   let videoTime = $state(0);
+  let voiceSpeaking = $state(false);
   let lastTimestamp = 0;
   let videoAnimationId: number | null = null;
   let svgElement: SVGSVGElement | null = $state(null);
@@ -60,9 +61,20 @@
     lastTimestamp = timestamp;
 
     if (videoPlaying) {
-      videoTime += elapsed / 1000;
-      if (videoTime >= 15) {
-        videoTime = 0; // Loop back
+      // Check if we are approaching the end of a subtitle segment and the voice is still speaking
+      const isFreezing = voiceSpeaking && (
+        (videoTime >= 1.9 && videoTime < 2.0) ||
+        (videoTime >= 5.9 && videoTime < 6.0) ||
+        (videoTime >= 7.9 && videoTime < 8.0) ||
+        (videoTime >= 11.9 && videoTime < 12.0) ||
+        (videoTime >= 14.9 && videoTime < 15.0)
+      );
+
+      if (!isFreezing) {
+        videoTime += elapsed / 1000;
+        if (videoTime >= 15) {
+          videoTime = 0; // Loop back
+        }
       }
     }
     videoAnimationId = requestAnimationFrame(runVideoLoop);
@@ -228,7 +240,7 @@
   // Get simulated caption/subtitle text
   function getSimulatedCaption(t: number): string {
     if (t >= 0.0 && t < 2.0) {
-      return "Welcome to Linetrick! Drag crossing nodes to untangle wires.";
+      return "Welcome to Line Trick! Drag crossing nodes to untangle wires.";
     } else if (t >= 2.0 && t < 6.0) {
       return "Crossing lines glow pink. Clean, untangled paths glow neon cyan.";
     } else if (t >= 6.0 && t < 8.0) {
@@ -248,6 +260,39 @@
   let isMuted = $state(false);
   let lastSpokenText = "";
 
+  // Cache loaded system voices
+  let systemVoices: SpeechSynthesisVoice[] = [];
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    systemVoices = window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => {
+      systemVoices = window.speechSynthesis.getVoices();
+    };
+  }
+
+  function getBestEnglishVoice(): SpeechSynthesisVoice | null {
+    if (systemVoices.length === 0) return null;
+    
+    // Natural human sounding English voice keywords in order of preference
+    const preferredKeywords = [
+      "Google US English",
+      "Samantha",
+      "Siri",
+      "Daniel",
+      "Microsoft Zira",
+      "Microsoft David"
+    ];
+
+    for (const keyword of preferredKeywords) {
+      const found = systemVoices.find(v => 
+        v.lang.startsWith("en") && 
+        v.name.toLowerCase().includes(keyword.toLowerCase())
+      );
+      if (found) return found;
+    }
+
+    return systemVoices.find(v => v.lang.startsWith("en")) || null;
+  }
+
   function speakSubtitle(text: string) {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     
@@ -255,6 +300,7 @@
     if (isMuted || !showVideoDemo || !videoPlaying) {
       window.speechSynthesis.cancel();
       lastSpokenText = "";
+      voiceSpeaking = false;
       return;
     }
 
@@ -264,17 +310,24 @@
     // Cancel the previous voice and speak the new text
     window.speechSynthesis.cancel();
     lastSpokenText = text;
+    voiceSpeaking = true;
     
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.95; // Slightly slower for crisp clear reading
+    utterance.rate = 0.88; // Relaxed reading speed so the user can easily absorb instructions
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
+
+    const bestVoice = getBestEnglishVoice();
+    if (bestVoice) {
+      utterance.voice = bestVoice;
+    }
     
     utterance.onerror = () => {
       lastSpokenText = "";
+      voiceSpeaking = false;
     };
     utterance.onend = () => {
-      // Done
+      voiceSpeaking = false;
     };
 
     window.speechSynthesis.speak(utterance);
